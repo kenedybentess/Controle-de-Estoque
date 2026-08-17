@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "wms_final": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
