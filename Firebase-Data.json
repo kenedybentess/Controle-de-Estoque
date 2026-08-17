@@ -1,0 +1,100 @@
+{
+  "wms_final": {
+    "material_livre": {
+      "m1": {
+        "id": "m1",
+        "material": "1000234",
+        "texto": "PARAFUSO M8 X 30 INOX",
+        "utilizacao": "1.250",
+        "um": "PC",
+        "deposito": "100",
+        "qtd": 500
+      },
+      "m2": {
+        "id": "m2",
+        "material": "1000891",
+        "texto": "CHAPA ACO 1020 3MM",
+        "utilizacao": "8.100",
+        "um": "KG",
+        "deposito": "100",
+        "qtd": 120
+      },
+      "m3": {
+        "id": "m3",
+        "material": "1001120",
+        "texto": "MOTOR ELETRICO 2CV",
+        "utilizacao": "12.000",
+        "um": "PC",
+        "deposito": "200",
+        "qtd": 12
+      },
+      "m4": {
+        "id": "m4",
+        "material": "1001345",
+        "texto": "ROLAMENTO 6205 ZZ",
+        "utilizacao": "0.850",
+        "um": "PC",
+        "deposito": "100",
+        "qtd": 240
+      },
+      "m5": {
+        "id": "m5",
+        "material": "1001456",
+        "texto": "CABO FLEX 2.5MM AZ",
+        "utilizacao": "45.300",
+        "um": "M",
+        "deposito": "300",
+        "qtd": 800
+      },
+      "m6": {
+        "id": "m6",
+        "material": "1001567",
+        "texto": "DISJUNTOR DIN 32A",
+        "utilizacao": "5.600",
+        "um": "PC",
+        "deposito": "200",
+        "qtd": 65
+      }
+    },
+    "ruas": [
+      "RUA 01",
+      "RUA 02",
+      "RUA 03",
+      "RUA 04",
+      "RUA 05",
+      "RUA 06",
+      "RUA 07",
+      "RUA 08",
+      "RUA 09",
+      "RUA 10",
+      "RUA 11",
+      "RUA 12",
+      "RUA 13",
+      "RUA 14",
+      "RUA 15",
+      "RUA 16",
+      "RUA 17",
+      "RUA 18",
+      "RUA 19",
+      "RUA 20"
+    ],
+    "posicoes": {
+      "R01-N1-D01": {
+        "posId": "R01-N1-D01",
+        "rua": "RUA 01",
+        "nivel": 1,
+        "profundidade": 1,
+        "materialId": null,
+        "ocupado": false
+      },
+      "R01-N1-D02": {
+        "posId": "R01-N1-D02",
+        "rua": "RUA 01",
+        "nivel": 1,
+        "profundidade": 2,
+        "materialId": null,
+        "ocupado": false
+      }
+    }
+  }
+}
