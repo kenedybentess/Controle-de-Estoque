@@ -31,372 +31,213 @@ Error generating stack: `+u.message+`
   <script>(function(){function m(a){var h=a.getAttribute("href");if(!h)return;try{var u=new URL(h,document.baseURI);if((u.protocol==="http:"||u.protocol==="https:")&&u.host!==location.host){a.target="_blank";a.rel="noopener noreferrer";}}catch(e){}}function s(){document.querySelectorAll("a[href]").forEach(m);}if(document.readyState!=="loading"){s();}else{document.addEventListener("DOMContentLoaded",s);}document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(a){m(a);}},true);})();</script>
   
 
-<!-- INJEÇÃO ABA CONSUMO - NÃO ALTERA CÓDIGO ORIGINAL -->
-<div id="consumo-root" style="display:none; position:relative; z-index:50;"></div>
+<!-- INJEÇÃO ABA CONSUMO V2 - CORRIGIDO -->
+<div id="consumo-root" style="display:none;"></div>
+<style id="consumo-styles">
+  .consumo-panel{max-width:1440px;margin:0 auto;padding:24px 16px;}
+  @media(min-width:768px){.consumo-panel{padding:24px 24px}}
+  .pill-active{ background:white!important; color:black!important; border-color:white!important; box-shadow:0 1px 2px rgba(0,0,0,.1)!important; }
+</style>
 <script>
 (function(){
-  const KEY_MAT = "wms_final_materiais";
-  const KEY_CONS = "wms_final_consumos";
-  const KEY_RUAS = "wms_final_ruas";
-  const KEY_POS = "wms_final_posicoes";
-  
-  function loadMat(){ try{return JSON.parse(localStorage.getItem(KEY_MAT)||"[]")}catch{return[]} }
-  function loadCons(){ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return[]} }
-  function saveMat(v){ localStorage.setItem(KEY_MAT, JSON.stringify(v)); window.dispatchEvent(new Event('storage')); }
-  function saveCons(v){ localStorage.setItem(KEY_CONS, JSON.stringify(v)); }
+  const KEY_MAT="wms_final_materiais", KEY_CONS="wms_final_consumos";
+  const loadMat=()=>{try{return JSON.parse(localStorage.getItem(KEY_MAT)||"[]")}catch{return[]}};
+  const loadCons=()=>{try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return[]}};
+  const saveMat=v=>{localStorage.setItem(KEY_MAT,JSON.stringify(v))};
+  const saveCons=v=>{localStorage.setItem(KEY_CONS,JSON.stringify(v))};
 
-  function ensureStyles(){
-    if(document.getElementById('consumo-styles')) return;
-    const s=document.createElement('style');
-    s.id='consumo-styles';
-    s.textContent=`
-      .consumo-pill-active{background:white!important;color:black!important;border-color:white!important;box-shadow:0 1px 2px rgba(0,0,0,.1)}
-      .consumo-panel{max-width:1440px;margin:0 auto;padding:24px 16px;}
-      @media(min-width:768px){.consumo-panel{padding:24px 24px}}
-    `;
-    document.head.appendChild(s);
-  }
-
-  function createConsumoUI(){
-    ensureStyles();
+  function buildUI(){
     const root=document.getElementById('consumo-root');
+    if(!root || root.dataset.built) return;
+    root.dataset.built="1";
     root.innerHTML=`
       <div class="consumo-panel space-y-4">
         <div class="bg-[#151518] border border-[#232326] rounded-2xl p-4">
-          <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-2">
-              <div class="h-8 w-8 rounded-lg bg-[#0e0e10] border border-[#232326] flex items-center justify-center text-zinc-400">⚙</div>
-              <div>
-                <div class="text-[13px] font-semibold text-white">Consumo • Baixa para Produção</div>
-                <div class="text-[11px] text-zinc-500">Registra o que foi pago/uso p/ produção e dá baixa automática no estoque (wms_final_materiais)</div>
-              </div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="h-8 w-8 rounded-lg bg-[#0e0e10] border border-[#232326] flex items-center justify-center">📦</div>
+            <div>
+              <div class="text-[13px] font-semibold text-white">Consumo • Baixa para Produção</div>
+              <div class="text-[11px] text-zinc-500">O que foi pago/uso para produção - baixa automática no estoque</div>
             </div>
-            <span id="consumo-count" class="text-[11px] text-zinc-500 border border-[#232326] rounded-full px-2.5 py-1"></span>
           </div>
-          
           <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
             <div class="md:col-span-4">
               <label class="text-[11px] text-zinc-400 mb-1 block">Material *</label>
-              <select id="c-mat" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none focus:border-violet-500/50"></select>
+              <select id="c-mat" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3"></select>
               <div id="c-saldo" class="text-[11px] text-zinc-500 mt-1"></div>
             </div>
             <div class="md:col-span-2">
               <label class="text-[11px] text-zinc-400 mb-1 block">Qtd *</label>
-              <input id="c-qtd" type="number" step="any" min="0" placeholder="0" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none focus:border-violet-500/50">
+              <input id="c-qtd" type="number" step="any" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="0">
             </div>
             <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Tipo *</label>
-              <select id="c-tipo" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none">
-                <option value="Produção">Produção</option>
-                <option value="Perda">Perda</option>
-                <option value="Amostra">Amostra</option>
-                <option value="Ajuste">Ajuste</option>
+              <label class="text-[11px] text-zinc-400 mb-1 block">Tipo</label>
+              <select id="c-tipo" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3">
+                <option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option>
               </select>
             </div>
             <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">OP / Ordem</label>
-              <input id="c-op" placeholder="OP-123" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none">
+              <label class="text-[11px] text-zinc-400 mb-1 block">OP</label>
+              <input id="c-op" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="OP-123">
             </div>
             <div class="md:col-span-2">
               <label class="text-[11px] text-zinc-400 mb-1 block">Data</label>
-              <input id="c-data" type="date" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none">
+              <input id="c-data" type="date" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3">
             </div>
             <div class="md:col-span-10">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Observação</label>
-              <input id="c-obs" placeholder="Ex: pago para produção lote A..." class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none">
+              <input id="c-obs" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="Observação: pago para produção lote...">
             </div>
-            <div class="md:col-span-2 flex items-end">
-              <button id="c-btn" class="w-full h-10 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-[13px] font-semibold transition">Registrar Baixa</button>
+            <div class="md:col-span-2">
+              <button id="c-btn" class="w-full h-10 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-[13px] font-bold">Registrar Baixa</button>
             </div>
           </div>
-          <div id="c-msg" class="mt-3 text-[12px] hidden"></div>
+          <div id="c-msg" class="hidden mt-3 text-[12px] p-3 rounded-xl"></div>
         </div>
-
-        <div class="grid grid-cols-3 gap-3">
-          <div class="bg-[#151518] border border-[#232326] rounded-2xl p-3">
-            <div class="text-[11px] text-zinc-500">Hoje</div>
-            <div id="c-hoje" class="text-[18px] font-semibold text-white">0</div>
-          </div>
-          <div class="bg-[#151518] border border-[#232326] rounded-2xl p-3">
-            <div class="text-[11px] text-zinc-500">Mês</div>
-            <div id="c-mes" class="text-[18px] font-semibold text-white">0</div>
-          </div>
-          <div class="bg-[#151518] border border-[#232326] rounded-2xl p-3">
-            <div class="text-[11px] text-zinc-500">Produção</div>
-            <div id="c-prod" class="text-[18px] font-semibold text-violet-400">0</div>
-          </div>
-        </div>
-
         <div class="bg-[#151518] border border-[#232326] rounded-2xl overflow-hidden">
-          <div class="p-3 border-b border-[#232326] flex items-center justify-between">
-            <div class="text-[13px] font-semibold text-white">Histórico de Consumo</div>
-            <input id="c-busca" placeholder="Buscar material, OP..." class="h-8 w-[200px] rounded-full bg-[#0e0e10] border border-[#232326] text-[12px] px-3 text-white outline-none">
+          <div class="p-3 flex justify-between items-center border-b border-[#232326]">
+            <span class="text-white text-[13px] font-semibold">Histórico (<span id="c-count">0</span>)</span>
+            <input id="c-busca" placeholder="Buscar..." class="h-8 w-[180px] rounded-full bg-[#0e0e10] border border-[#232326] text-[12px] px-3 text-white">
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-[12px]">
-              <thead class="text-[11px] text-zinc-500 border-b border-[#232326]">
-                <tr><th class="text-left p-2.5 font-medium">Data</th><th class="text-left p-2.5 font-medium">Material</th><th class="text-left p-2.5 font-medium">Qtd</th><th class="text-left p-2.5 font-medium">Tipo</th><th class="text-left p-2.5 font-medium">OP</th><th class="text-left p-2.5 font-medium">Antes→Depois</th><th class="text-left p-2.5 font-medium">Obs</th><th class="text-left p-2.5 font-medium">Ação</th></tr>
-              </thead>
-              <tbody id="c-tbody" class="text-zinc-300"></tbody>
-            </table>
-          </div>
+          <div class="overflow-x-auto"><table class="w-full text-[12px]"><thead class="text-[11px] text-zinc-500 border-b border-[#232326]"><tr><th class="text-left p-2.5">Data</th><th class="text-left p-2.5">Material</th><th class="text-left p-2.5">Qtd</th><th class="text-left p-2.5">Tipo</th><th class="text-left p-2.5">OP</th><th class="text-left p-2.5">Antes→Depois</th><th class="text-left p-2.5">Ação</th></tr></thead><tbody id="c-tbody" class="text-zinc-300"></tbody></table></div>
         </div>
-      </div>
-    `;
-    
-    // init date today
-    document.getElementById('c-data').valueAsDate = new Date();
-    bindEvents();
-    refreshAll();
-    setInterval(refreshAll, 1500);
+      </div>`;
+    document.getElementById('c-data').valueAsDate=new Date();
+    bind();
+    refresh();
+    setInterval(refresh, 2000);
   }
 
-  function refreshMaterialsSelect(){
+  function refresh(){
     const sel=document.getElementById('c-mat');
     if(!sel) return;
     const mats=loadMat();
     const cur=sel.value;
-    sel.innerHTML='<option value="">Selecione...</option>'+mats.map(m=>{
-      const saldo = m.saldo ?? m.quantidade ?? m.qtd ?? 0;
-      const nome = m.nome || m.descricao || m.codigo || m.sku || 'Sem nome';
-      const sku = m.sku || m.codigo || '';
-      return `<option value="${m.id}">${sku} - ${nome} | Saldo: ${saldo} ${m.unidade||''}</option>`;
-    }).join('');
+    sel.innerHTML='<option value="">Selecione material...</option>'+mats.map(m=>{const s=m.saldo??m.quantidade??0; return `<option value="${m.id}">${(m.sku||m.codigo||'') } - ${m.nome||m.descricao||'Sem nome'} | Saldo: ${s} ${m.unidade||''}</option>`}).join('');
     if(cur) sel.value=cur;
-    updateSaldoHint();
-  }
-
-  function updateSaldoHint(){
-    const sel=document.getElementById('c-mat');
     const hint=document.getElementById('c-saldo');
-    if(!sel||!hint) return;
-    const mats=loadMat();
-    const m=mats.find(x=>String(x.id)===String(sel.value));
-    if(!m){hint.textContent='';return}
-    const saldo = m.saldo ?? m.quantidade ?? 0;
-    hint.textContent=`Saldo atual: ${saldo} ${m.unidade||''} | Local: ${m.posicao||m.rua||''}`;
-    hint.className = saldo<=0 ? 'text-[11px] mt-1 text-red-400' : 'text-[11px] mt-1 text-zinc-500';
-  }
+    const chosen=mats.find(x=>String(x.id)===String(sel.value));
+    if(hint){ hint.textContent=chosen?`Saldo atual: ${chosen.saldo??chosen.quantidade??0} ${chosen.unidade||''}`:''; }
 
-  function refreshTable(){
+    // table
     const tbody=document.getElementById('c-tbody');
-    const countEl=document.getElementById('c-count');
-    const buscaEl=document.getElementById('c-busca');
-    if(!tbody) return;
-    let cons=loadCons().sort((a,b)=> new Date(b.data)-new Date(a.data));
-    const busca=(buscaEl?.value||'').toLowerCase();
-    if(busca){
-      cons=cons.filter(c=> JSON.stringify(c).toLowerCase().includes(busca));
-    }
-    if(countEl) countEl.textContent = cons.length+' registros';
-    const countBadge=document.getElementById('consumo-count');
-    if(countBadge) countBadge.textContent = loadCons().length+' registros';
-    
-    // resumos
-    const hoje=new Date().toISOString().slice(0,10);
-    const mes=new Date().toISOString().slice(0,7);
-    const hojeSum=loadCons().filter(c=>c.data===hoje).reduce((s,c)=>s+Number(c.qtd||0),0);
-    const mesSum=loadCons().filter(c=>c.data?.startsWith(mes)).reduce((s,c)=>s+Number(c.qtd||0),0);
-    const prodSum=loadCons().filter(c=>c.tipo==='Produção').reduce((s,c)=>s+Number(c.qtd||0),0);
-    const elH=document.getElementById('c-hoje'), elM=document.getElementById('c-mes'), elP=document.getElementById('c-prod');
-    if(elH) elH.textContent=hojeSum;
-    if(elM) elM.textContent=mesSum;
-    if(elP) elP.textContent=prodSum;
-
-    tbody.innerHTML=cons.map(c=>`
-      <tr class="border-b border-[#1e1e22] hover:bg-[#1c1c1f]">
-        <td class="p-2.5 whitespace-nowrap">${c.data||''}</td>
-        <td class="p-2.5"><div class="text-white">${c.nome||''}</div><div class="text-[11px] text-zinc-500">${c.sku||''}</div></td>
-        <td class="p-2.5 font-medium text-white">-${c.qtd}</td>
-        <td class="p-2.5"><span class="px-2 py-0.5 rounded-full text-[11px] border ${c.tipo==='Produção'?'bg-violet-500/15 border-violet-500/30 text-violet-300':c.tipo==='Perda'?'bg-red-500/15 border-red-500/30 text-red-300':'bg-zinc-500/15 border-zinc-500/30 text-zinc-300'}">${c.tipo}</span></td>
-        <td class="p-2.5 text-zinc-400">${c.op||'-'}</td>
-        <td class="p-2.5 whitespace-nowrap">${c.saldoAnterior} → <span class="text-white">${c.saldoNovo}</span></td>
-        <td class="p-2.5 text-zinc-400 max-w-[160px] truncate">${c.obs||''}</td>
-        <td class="p-2.5"><button data-id="${c.id}" class="btn-estornar h-6 px-2 rounded-full bg-[#232326] hover:bg-[#2a2a30] text-[11px]">Estornar</button></td>
-      </tr>
-    `).join('') || `<tr><td colspan="8" class="p-6 text-center text-zinc-500">Nenhum consumo registrado</td></tr>`;
-
-    tbody.querySelectorAll('.btn-estornar').forEach(btn=>{
-      btn.onclick=()=>{
-        const id=btn.getAttribute('data-id');
-        if(!confirm('Estornar? Vai devolver ao estoque.')) return;
-        const cons=loadCons();
-        const item=cons.find(x=>String(x.id)===String(id));
-        if(!item) return;
-        const mats=loadMat();
-        const mIdx=mats.findIndex(x=>String(x.id)===String(item.materialId));
-        if(mIdx>-1){
-          const saldoAtual = Number(mats[mIdx].saldo ?? mats[mIdx].quantidade ?? 0);
-          mats[mIdx].saldo = saldoAtual + Number(item.qtd);
-          if(mats[mIdx].quantidade!==undefined) mats[mIdx].quantidade = mats[mIdx].saldo;
-          saveMat(mats);
-        }
-        saveCons(cons.filter(x=>String(x.id)!==String(id)));
-        refreshAll();
-        showMsg('Estornado e devolvido ao estoque!', 'ok');
-      }
+    const busca=(document.getElementById('c-busca')?.value||'').toLowerCase();
+    let cons=loadCons().sort((a,b)=>b.id-a.id);
+    if(busca) cons=cons.filter(c=>JSON.stringify(c).toLowerCase().includes(busca));
+    document.getElementById('c-count').textContent=loadCons().length;
+    const pill=document.getElementById('pill-cons-count');
+    if(pill) pill.textContent=loadCons().length;
+    tbody.innerHTML=cons.map(c=>`<tr class="border-b border-[#1e1e22]"><td class="p-2.5">${c.data}</td><td class="p-2.5 text-white">${c.nome}<div class="text-[11px] text-zinc-500">${c.sku}</div></td><td class="p-2.5 text-white">-${c.qtd}</td><td class="p-2.5"><span class="px-2 py-0.5 rounded-full border text-[11px] bg-violet-500/15 border-violet-500/30">${c.tipo}</span></td><td class="p-2.5">${c.op||'-'}</td><td class="p-2.5">${c.saldoAnterior} → ${c.saldoNovo}</td><td class="p-2.5"><button data-id="${c.id}" class="btn-est h-6 px-2 rounded-full bg-[#232326] text-[11px]">Estornar</button></td></tr>`).join('')||'<tr><td colspan="7" class="p-6 text-center text-zinc-500">Nenhum consumo</td></tr>';
+    tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
+      if(!confirm('Estornar e devolver ao estoque?')) return;
+      const id=b.dataset.id;
+      const cons=loadCons(); const it=cons.find(x=>String(x.id)===String(id));
+      if(!it) return;
+      const mats=loadMat(); const idx=mats.findIndex(x=>String(x.id)===String(it.materialId));
+      if(idx>-1){ mats[idx].saldo=(Number(mats[idx].saldo??0)+Number(it.qtd)); if(mats[idx].quantidade!==undefined) mats[idx].quantidade=mats[idx].saldo; saveMat(mats); }
+      saveCons(cons.filter(x=>String(x.id)!==String(id)));
+      refresh();
     });
   }
 
-  function refreshAll(){
-    refreshMaterialsSelect();
-    refreshTable();
-  }
-
-  function showMsg(txt, type){
-    const el=document.getElementById('c-msg');
-    if(!el) return;
-    el.textContent=txt;
-    el.className='mt-3 text-[12px] p-2.5 rounded-xl border '+(type==='err'?'bg-red-950/50 border-red-900/50 text-red-200':'bg-emerald-500/10 border-emerald-500/30 text-emerald-200');
-    el.classList.remove('hidden');
-    setTimeout(()=>el.classList.add('hidden'), 4000);
-  }
-
-  function bindEvents(){
-    const sel=document.getElementById('c-mat');
-    const qtd=document.getElementById('c-qtd');
-    const tipo=document.getElementById('c-tipo');
-    const op=document.getElementById('c-op');
-    const obs=document.getElementById('c-obs');
-    const data=document.getElementById('c-data');
+  function bind(){
     const btn=document.getElementById('c-btn');
-    const busca=document.getElementById('c-busca');
-    if(!btn) return;
-    if(btn.dataset.bound) return;
-    btn.dataset.bound='1';
-    sel?.addEventListener('change', updateSaldoHint);
-    busca?.addEventListener('input', refreshTable);
-
+    if(!btn || btn.dataset.b) return;
+    btn.dataset.b="1";
+    document.getElementById('c-mat')?.addEventListener('change', refresh);
+    document.getElementById('c-busca')?.addEventListener('input', refresh);
     btn.onclick=()=>{
       const mats=loadMat();
-      const materialId=sel.value;
-      if(!materialId){ showMsg('Selecione o material', 'err'); return; }
-      const m=mats.find(x=>String(x.id)===String(materialId));
-      if(!m){ showMsg('Material não encontrado', 'err'); return; }
-      const q=Number((qtd.value||'').replace(',','.'));
-      if(!q||q<=0){ showMsg('Informe quantidade válida', 'err'); return; }
-      const saldoAtual=Number(m.saldo ?? m.quantidade ?? 0);
-      if(tipo.value==='Produção' && q>saldoAtual){
-        showMsg(`Saldo insuficiente! Saldo atual ${saldoAtual}, tentou baixar ${q}`, 'err');
-        return;
-      }
-      const saldoAnterior=saldoAtual;
-      const saldoNovo=saldoAtual - q;
-      
-      // baixa
-      const idx=mats.findIndex(x=>String(x.id)===String(materialId));
-      mats[idx].saldo = saldoNovo;
-      if(mats[idx].quantidade!==undefined) mats[idx].quantidade = saldoNovo;
+      const sel=document.getElementById('c-mat');
+      const m=mats.find(x=>String(x.id)===String(sel.value));
+      if(!m){ alert('Selecione material'); return; }
+      const q=Number(document.getElementById('c-qtd').value.replace(',','.'));
+      if(!q||q<=0){ alert('Qtd inválida'); return; }
+      const saldo=Number(m.saldo??m.quantidade??0);
+      const tipo=document.getElementById('c-tipo').value;
+      if(tipo==='Produção' && q>saldo){ alert('Saldo insuficiente! Saldo: '+saldo); return; }
+      const idx=mats.findIndex(x=>String(x.id)===String(m.id));
+      const ant=saldo, novo=saldo-q;
+      mats[idx].saldo=novo; if(mats[idx].quantidade!==undefined) mats[idx].quantidade=novo;
       saveMat(mats);
-
-      const registro={
-        id: Date.now(),
-        materialId: m.id,
-        sku: m.sku || m.codigo || '',
-        nome: m.nome || m.descricao || '',
-        qtd: q,
-        unidade: m.unidade || '',
-        tipo: tipo.value,
-        op: op.value||'',
-        obs: obs.value||'',
-        data: data.value || new Date().toISOString().slice(0,10),
-        saldoAnterior,
-        saldoNovo,
-        timestamp: new Date().toISOString()
-      };
-      const cons=loadCons();
-      cons.push(registro);
-      saveCons(cons);
-      
-      // limpa
-      qtd.value=''; op.value=''; obs.value='';
-      refreshAll();
-      showMsg(`Baixa de ${q} ${m.unidade||''} de ${m.nome||m.sku} • Novo saldo: ${saldoNovo}`, 'ok');
-      
-      // força React original a recarregar se possível
-      try{ localStorage.setItem('_wms_trigger_reload', String(Date.now())); }catch{}
+      const reg={id:Date.now(), materialId:m.id, sku:m.sku||m.codigo||'', nome:m.nome||m.descricao||'', qtd:q, tipo, op:document.getElementById('c-op').value, data:document.getElementById('c-data').value||new Date().toISOString().slice(0,10), saldoAnterior:ant, saldoNovo:novo, obs:document.getElementById('c-obs').value};
+      const cons=loadCons(); cons.push(reg); saveCons(cons);
+      document.getElementById('c-qtd').value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
+      refresh();
+      const msg=document.getElementById('c-msg');
+      msg.textContent=`Baixa de ${q} de ${reg.nome} • Novo saldo: ${novo}`;
+      msg.className='mt-3 text-[12px] p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200';
+      msg.classList.remove('hidden');
+      setTimeout(()=>msg.classList.add('hidden'),4000);
+      // força React perceber mudança
+      window.dispatchEvent(new Event('storage'));
     };
   }
 
-  function injectButton(){
-    // procura barra de abas
-    const tryFind=()=>{
-      const bars=document.querySelectorAll('div.mx-auto.max-w-\[1440px\].px-4.md\:px-6.pt-6.flex');
-      for(const bar of bars){
-        if(bar.querySelector('[data-consumo-btn]')) return true;
-        // verifica se tem botoes Livre e Estoque
-        const txt=bar.textContent||'';
-        if(txt.includes('Livre') && txt.includes('Estoque')){
-          const btn=document.createElement('button');
-          btn.setAttribute('data-consumo-btn','1');
-          btn.id='btn-consumo-pill';
-          btn.className='h-9 px-5 rounded-full text-[13px] font-medium border transition flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white hover:border-zinc-700';
-          btn.innerHTML='⚙ Consumo • <span id="pill-cons-count">0</span>';
-          btn.onclick=()=>{
-            const main=document.querySelector('main');
-            const root=document.getElementById('consumo-root');
-            const isConsumo = root.style.display!=='none';
-            if(isConsumo){
-              // voltar para Livre
-              root.style.display='none';
-              if(main) main.style.display='';
-              // reset pills
-              document.querySelectorAll('div.mx-auto.max-w-\[1440px\].px-4.md\:px-6.pt-6.flex button').forEach(b=>{
-                if(!b.id.includes('consumo')) b.classList.remove('consumo-pill-active');
-              });
-              btn.className='h-9 px-5 rounded-full text-[13px] font-medium border transition flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white hover:border-zinc-700';
-            }else{
-              // ativar consumo
-              if(main) main.style.display='none';
-              // esconde outros paineis React? O main já contém tudo, então mostra nosso root fora do main
-              // move root para depois do header se necessário
-              root.style.display='block';
-              // ativa visual
-              btn.className='h-9 px-5 rounded-full text-[13px] font-medium border transition flex items-center gap-2 consumo-pill-active';
-              // desativa outros pills visualmente
-              bar.querySelectorAll('button').forEach(b=>{
-                if(b!==btn){
-                  b.classList.remove('bg-white','text-black','border-white','shadow');
-                  b.classList.add('bg-[#151518]','border-[#232326]','text-zinc-400');
-                }
-              });
-              refreshAll();
-            }
-            // atualiza count
-            const c=loadCons().length;
-            const el=document.getElementById('pill-cons-count');
-            if(el) el.textContent=c;
-          };
-          bar.appendChild(btn);
-          
-          // observer para manter count atualizado
-          setInterval(()=>{
-            const c=loadCons().length;
-            const el=document.getElementById('pill-cons-count');
-            if(el) el.textContent=c;
-          },1000);
-          
-          return true;
+  function injectPill(){
+    // Acha barra de abas pelo texto Livre e Estoque
+    const allDivs=document.querySelectorAll('div');
+    let bar=null;
+    for(const d of allDivs){
+      const t=d.textContent||'';
+      // barra tem Livre e Estoque e é flex com gap-2
+      if(t.includes('Livre') && t.includes('Estoque') && d.className.includes('flex') && d.className.includes('gap-2') && d.children.length>=2){
+        // evita pegar div grande demais
+        if(d.className.includes('max-w-[1440px]') && d.className.includes('pt-6')){
+          bar=d; break;
         }
       }
-      return false;
-    };
+    }
+    if(!bar){
+      // fallback: procura por botão com texto Livre
+      const btns=document.querySelectorAll('button');
+      for(const b of btns){ if(b.textContent.includes('Livre')){ bar=b.parentElement; break; } }
+    }
+    if(!bar) return false;
+    if(bar.querySelector('#btn-consumo-pill')) return true;
 
-    let attempts=0;
-    const int=setInterval(()=>{
-      attempts++;
-      if(tryFind() || attempts>100) clearInterval(int);
-    },300);
+    const btn=document.createElement('button');
+    btn.id='btn-consumo-pill';
+    btn.setAttribute('data-consumo-btn','1');
+    btn.className='h-9 px-5 rounded-full text-[13px] font-medium border transition flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white hover:border-zinc-700';
+    btn.innerHTML='⚙️ Consumo • <span id="pill-cons-count">0</span>';
+    btn.onclick=()=>{
+      const main=document.querySelector('main');
+      const root=document.getElementById('consumo-root');
+      const active = root.style.display!=='none';
+      // desativa todos pills visuais
+      const allPills=bar.querySelectorAll('button');
+      allPills.forEach(p=>{ p.classList.remove('pill-active','bg-white','text-black','border-white'); p.classList.add('bg-[#151518]','border-[#232326]','text-zinc-400'); });
+      if(active){
+        root.style.display='none';
+        if(main) main.style.display='';
+        // reativa Livre como ativo visualmente? deixa ambos inativos que React corrige no próximo render
+      }else{
+        if(main) main.style.display='none';
+        root.style.display='block';
+        btn.classList.add('pill-active');
+        btn.classList.remove('bg-[#151518]','border-[#232326]','text-zinc-400');
+        buildUI();
+        refresh();
+      }
+    };
+    bar.appendChild(btn);
+    return true;
   }
 
-  // inicia
-  window.addEventListener('load', ()=>{
-    createConsumoUI();
-    injectButton();
-  });
-  // caso React demore
-  setTimeout(()=>{ createConsumoUI(); injectButton(); }, 1000);
-  setTimeout(()=>{ createConsumoUI(); injectButton(); }, 2500);
+  function init(){
+    buildUI();
+    let tries=0;
+    const iv=setInterval(()=>{
+      tries++;
+      if(injectPill() || tries>80) clearInterval(iv);
+    },400);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+  window.addEventListener('load', init);
+  setTimeout(init, 800);
+  setTimeout(init, 2000);
 })();
 </script>
 
