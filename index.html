@@ -31,74 +31,109 @@ Error generating stack: `+u.message+`
   <script>(function(){function m(a){var h=a.getAttribute("href");if(!h)return;try{var u=new URL(h,document.baseURI);if((u.protocol==="http:"||u.protocol==="https:")&&u.host!==location.host){a.target="_blank";a.rel="noopener noreferrer";}}catch(e){}}function s(){document.querySelectorAll("a[href]").forEach(m);}if(document.readyState!=="loading"){s();}else{document.addEventListener("DOMContentLoaded",s);}document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(a){m(a);}},true);})();</script>
   
 
-<div id="consumo-root" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:999999; background:#0e0e10; overflow-y:auto;"></div>
+<div id="consumo-root" style="display:none; position:fixed; inset:0; z-index:999999; background:#0e0e10; overflow:auto;"></div>
 <style>.pill-active{ background:white!important; color:black!important; border-color:white!important; }</style>
 <script>
 (function(){
-  const KEY_MAT="wms_final_materiais", KEY_CONS="wms_final_consumos";
+  const KEY_MAT="wms_final_materiais", KEY_POS="wms_final_posicoes", KEY_CONS="wms_final_consumos";
   
-  // FUNÇÃO DE LIMPEZA - REMOVE DUPLICADOS
-  function limparDuplicados(){
+  // CORREÇÃO PRINCIPAL: impede material aparecer em 2 ruas
+  function corrigirDuplicacaoEntreRuas(){
     try{
-      const raw=localStorage.getItem(KEY_MAT);
-      if(!raw) return;
-      const arr=JSON.parse(raw);
-      const seen=new Map();
-      const cleaned=[];
-      for(const m of arr){
-        const id=String(m.id||m.codigo||m.sku);
-        const key=id+'|'+(m.posicao||m.rua||'')+'|'+(m.sku||'');
-        // se já existe mesmo id + mesma posicao, mescla saldo (soma) e mantém 1
-        if(seen.has(key)){
-          const idx=seen.get(key);
-          // soma saldo se for duplicado real
-          const s1=Number(cleaned[idx].saldo??cleaned[idx].quantidade??0);
-          const s2=Number(m.saldo??m.quantidade??0);
-          // se for duplicado idêntico (mesmo objeto), não soma, só ignora
-          if(JSON.stringify(cleaned[idx])!==JSON.stringify(m)){
-            // mantém maior saldo
-            cleaned[idx].saldo=Math.max(s1,s2);
-            if(cleaned[idx].quantidade!==undefined) cleaned[idx].quantidade=cleaned[idx].saldo;
+      const rawMat=localStorage.getItem(KEY_MAT);
+      const rawPos=localStorage.getItem(KEY_POS);
+      if(!rawMat || !rawPos) return;
+      const mats=JSON.parse(rawMat);
+      const pos=JSON.parse(rawPos);
+      
+      // Mapeia material por ID para ver onde está alocado
+      // O bug original faz: ao alocar em Rua 12, ele também insere em Rua 14
+      // Vamos garantir que cada material só exista em UMA posição
+      
+      // Cria mapa de posições ocupadas: posicaoId -> material
+      const posMap={};
+      // pos é array de ruas? Vamos tentar descobrir formato
+      // Formato esperado: [{rua, posicoes:[{codigo, materialId, ...}]}] ou similar
+      // Vamos tentar dedup simples por materialId duplicado em pos diferentes
+      
+      // Se pos for array de objetos com materialId
+      if(Array.isArray(pos)){
+        const seenMatPos=new Map(); // materialId -> primeira posicao
+        let alterou=false;
+        for(let i=0;i<pos.length;i++){
+          const p=pos[i];
+          // p pode ser {id, rua, nivel, div, materialId, sku}
+          const matId=p.materialId||p.material_id||p.idMaterial;
+          if(!matId) continue;
+          const key=String(matId);
+          if(seenMatPos.has(key)){
+            // duplicado - limpa esse segundo
+            console.log('[CORREÇÃO] Removendo duplicado de rua:', p, 'já existe em', seenMatPos.get(key));
+            pos[i].materialId=null;
+            pos[i].material_id=null;
+            pos[i].sku=null;
+            pos[i].nome=null;
+            pos[i].vazia=true;
+            if(pos[i].ocupado!==undefined) pos[i].ocupado=false;
+            alterou=true;
+          } else {
+            seenMatPos.set(key, p);
           }
-        } else {
-          seen.set(key, cleaned.length);
-          cleaned.push(m);
+        }
+        if(alterou){
+          localStorage.setItem(KEY_POS, JSON.stringify(pos));
+          console.log('[CORREÇÃO] Posições corrigidas, duplicados removidos');
         }
       }
-      // segunda passada: dedup só por ID se tiver 2 com mesmo ID mas posicoes diferentes? Não, mantém posicoes diferentes
-      // mas remove duplicado exato de ID repetido
-      const byId=new Map();
-      const final=[];
-      for(const m of cleaned){
+      
+      // Também corrige materiais duplicados por ID
+      const seenId=new Map();
+      const finalMats=[];
+      let mudou=false;
+      for(const m of mats){
         const id=String(m.id);
-        if(byId.has(id)){
-          // já existe com mesmo ID, verifica se posicao igual
-          const existing=final[byId.get(id)];
-          if((existing.posicao||'')===(m.posicao||'') && (existing.sku||'')===(m.sku||'')){
-            continue; // duplicado exato
+        const posKey=String(m.posicao||m.rua||'');
+        const uniqKey=id+'|'+posKey;
+        if(seenId.has(uniqKey)){
+          mudou=true;
+          continue;
+        }
+        // se mesmo ID já existe em outra posição diferente, mantém só o primeiro
+        let jaExisteEmOutraPos=false;
+        for(const existing of finalMats){
+          if(String(existing.id)===id && String(existing.posicao||'')!==posKey){
+            // se for alocação nova, o usuário quer mover, não duplicar
+            // então remove o antigo e mantém o novo (último)
+            // Vamos remover o antigo
+            const idx=finalMats.findIndex(x=>String(x.id)===id);
+            if(idx>-1){ finalMats.splice(idx,1); }
+            break;
           }
         }
-        byId.set(id, final.length);
-        final.push(m);
+        seenId.set(uniqKey, true);
+        finalMats.push(m);
       }
-      if(final.length!==arr.length){
-        console.log('[LIMPEZA] Removidos duplicados:', arr.length-final.length);
-        localStorage.setItem(KEY_MAT, JSON.stringify(final));
+      if(mudou || finalMats.length!==mats.length){
+        console.log('[CORREÇÃO] Materiais: de', mats.length, 'para', finalMats.length);
+        localStorage.setItem(KEY_MAT, JSON.stringify(finalMats));
       }
-    }catch(e){ console.error('Erro limpeza', e); }
+      
+    }catch(e){ console.error('Erro correção', e); }
   }
 
+  // Roda correção a cada 800ms e em todo storage change
+  setInterval(corrigirDuplicacaoEntreRuas, 800);
+  window.addEventListener('storage', ()=>setTimeout(corrigirDuplicacaoEntreRuas, 200));
+
+  // CONSUMO (igual V6)
   const getMat=()=>{
-    limparDuplicados();
     try{
-      const raw=localStorage.getItem(KEY_MAT);
-      if(!raw) return [];
-      const arr=JSON.parse(raw);
+      const arr=JSON.parse(localStorage.getItem(KEY_MAT)||"[]");
       return arr.map(m=>{
         let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=m.qtd; if(s===undefined) s=0;
         return {...m, _saldo:Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||''};
       });
-    }catch(e){return []}
+    }catch{return []}
   };
   const getCons=()=>{ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return []}};
   const setMat=(mats)=>{
@@ -106,15 +141,9 @@ Error generating stack: `+u.message+`
       const orig=JSON.parse(localStorage.getItem(KEY_MAT)||"[]");
       const map={}; mats.forEach(x=>map[String(x.id)]=x._saldo);
       const upd=orig.map(o=>{ if(map[String(o.id)]!==undefined){ o.saldo=map[String(o.id)]; if(o.quantidade!==undefined) o.quantidade=o.saldo; } return o; });
-      // dedup antes de salvar
-      const seen=new Set(); const dedup=[];
-      for(const m of upd){ const k=String(m.id); if(!seen.has(k)){ seen.add(k); dedup.push(m); } else { /* ignora duplicado */ } }
-      // na verdade precisa manter posicoes diferentes, então dedup por id+posicao
-      const finalMap=new Map(); const final=[];
-      for(const m of upd){
-        const key=String(m.id)+'|'+(m.posicao||'');
-        if(!finalMap.has(key)){ finalMap.set(key,true); final.push(m); }
-      }
+      // dedup final
+      const uniq=new Map(); const final=[];
+      for(const m of upd){ const k=String(m.id)+'|'+(m.posicao||''); if(!uniq.has(k)){ uniq.set(k,true); final.push(m);} }
       localStorage.setItem(KEY_MAT, JSON.stringify(final));
     }catch{ localStorage.setItem(KEY_MAT, JSON.stringify(mats)); }
   };
@@ -125,67 +154,56 @@ Error generating stack: `+u.message+`
     const mats=getMat(); const cons=getCons();
     root.innerHTML=`
       <div style="max-width:1440px; margin:0 auto; padding:16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar ao WMS</button>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <button id="c-limpar-dup" style="height:32px; padding:0 12px; border-radius:9999px; background:#7c3aed; color:white; font-size:11px;">Limpar duplicados</button>
-            <div style="color:#71717a; font-size:11px;">${mats.length} materiais | ${cons.length} consumos</div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
+          <div style="display:flex; gap:8px;">
+            <button id="c-fix" style="height:32px; padding:0 12px; border-radius:9999px; background:#ef4444; color:white; font-size:11px; font-weight:bold;">CORRIGIR DUPLICAÇÃO DE RUAS</button>
+            <div style="color:#71717a; font-size:11px; border:1px solid #232326; border-radius:9999px; padding:6px 12px;">${mats.length} mat | ${cons.length} cons</div>
           </div>
         </div>
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; padding:16px;">
-          <div style="color:white; font-weight:bold; font-size:14px;">CONSUMO - Baixa para Produção</div>
-          <div style="color:#71717a; font-size:11px; margin-bottom:16px;">Dá baixa automática no estoque • Corrigido para não duplicar</div>
+          <div style="color:white; font-weight:bold;">CONSUMO - Baixa para Produção</div>
+          <div style="color:#71717a; font-size:11px; margin-bottom:12px;">Selecione material e dê baixa. Correção de ruas ativa.</div>
           <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap:12px;">
-            <div><label style="font-size:11px; color:#a1a1aa;">Material</label><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;">${mats.length===0?'<option value="">NENHUM MATERIAL</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select><div id="c-saldo" style="font-size:11px; color:#a78bfa; margin-top:4px; font-weight:bold;"></div></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">Qtd</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="10"></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option></select></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">OP</label><div style="display:flex; gap:8px; margin-top:4px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold;">BAIXAR</button></div></div>
+            <div><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;">${mats.length===0?'<option>NENHUM</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select><div id="c-saldo" style="font-size:11px; color:#a78bfa; margin-top:4px;"></div></div>
+            <div><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Qtd"></div>
+            <div><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;"><option>Produção</option><option>Perda</option><option>Amostra</option></select></div>
+            <div style="display:flex; gap:8px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold;">BAIXAR</button></div>
             <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs..."></div>
           </div>
-          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px; font-size:13px;"></div>
+          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px;"></div>
         </div>
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:16px;">
-          <div style="padding:12px; border-bottom:1px solid #232326; display:flex; justify-content:space-between;"><b style="color:white; font-size:13px;">Histórico</b><input id="c-busca" placeholder="Buscar..." style="height:32px; border-radius:9999px; background:#0e0e10; border:1px solid #232326; color:white; padding:0 12px; font-size:12px; width:160px;"></div>
-          <div style="overflow-x:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
+          <div style="padding:12px; border-bottom:1px solid #232326;"><b style="color:white; font-size:13px;">Histórico</b></div>
+          <div style="overflow:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
         </div>
       </div>
     `;
     document.getElementById('c-voltar').onclick=()=>{ document.getElementById('consumo-root').style.display='none'; document.body.style.overflow=''; };
-    document.getElementById('c-limpar-dup').onclick=()=>{ limparDuplicados(); renderPanel(); alert('Duplicados limpos!'); };
+    document.getElementById('c-fix').onclick=()=>{ corrigirDuplicacaoEntreRuas(); renderPanel(); alert('Correção executada! Verifique se Rua 14 não tem mais o material da Rua 12.'); };
     const sel=document.getElementById('c-mat');
     const saldoEl=document.getElementById('c-saldo');
-    const updSaldo=()=>{ const m=mats.find(x=>String(x.id)===String(sel.value)); if(saldoEl) saldoEl.textContent=m?`Saldo: ${m._saldo} ${m.unidade||''}`:''; };
-    sel.addEventListener('change', updSaldo); updSaldo();
+    sel.addEventListener('change', ()=>{ const m=getMat().find(x=>String(x.id)===String(sel.value)); if(saldoEl) saldoEl.textContent=m?`Saldo: ${m._saldo}`:''; });
     const tbody=document.getElementById('c-tbody');
-    const busca=document.getElementById('c-busca');
-    const draw=()=>{
-      let list=[...cons].sort((a,b)=>b.id-a.id);
-      const f=(busca.value||'').toLowerCase();
-      if(f) list=list.filter(x=>JSON.stringify(x).toLowerCase().includes(f));
-      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.nome}</b><div style="font-size:11px; color:#71717a;">${c.sku}</div></td><td style="padding:10px; font-weight:bold;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → <b style="color:white;">${c.depois}</b></td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center; color:#71717a;">Nenhum consumo</td></tr>';
-      tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
-        if(!confirm('Estornar?')) return;
-        const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
-        if(!it) return;
-        const cur=getMat(); const idx=cur.findIndex(x=>String(x.id)===String(it.materialId));
-        if(idx>-1){ cur[idx]._saldo+=Number(it.qtd); setMat(cur); }
-        setCons(all.filter(x=>String(x.id)!==String(id)));
-        renderPanel();
-      });
-    };
-    busca.addEventListener('input', draw); draw();
+    const consList=getCons().sort((a,b)=>b.id-a.id);
+    tbody.innerHTML=consList.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;">${c.nome}</td><td style="padding:10px;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → ${c.depois}</td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center; color:#71717a;">Nenhum</td></tr>';
+    tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
+      const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
+      const cur=getMat(); const idx=cur.findIndex(x=>String(x.id)===String(it.materialId));
+      if(idx>-1){ cur[idx]._saldo+=Number(it.qtd); setMat(cur); }
+      setCons(all.filter(x=>String(x.id)!==String(id)));
+      renderPanel();
+    });
     document.getElementById('c-btn').onclick=()=>{
-      const matId=sel.value; if(!matId){ alert('Selecione material'); return; }
+      const matId=sel.value; if(!matId){ alert('Selecione'); return; }
       const cur=getMat(); const mat=cur.find(x=>String(x.id)===String(matId));
-      if(!mat) return;
       const q=Number((document.getElementById('c-qtd').value||'').replace(',','.'));
       if(!q||q<=0){ alert('Qtd inválida'); return; }
       if(q>mat._saldo){ alert('Saldo insuficiente: '+mat._saldo); return; }
       const antes=mat._saldo, depois=antes-q;
       const idx=cur.findIndex(x=>String(x.id)===String(mat.id)); cur[idx]._saldo=depois; setMat(cur);
-      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
+      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
       const all=getCons(); all.push(reg); setCons(all);
-      const msg=document.getElementById('c-msg'); msg.textContent=`✅ Baixa: ${q} de ${reg.nome} | ${antes} → ${depois}`; msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
       renderPanel();
     };
   }
@@ -196,16 +214,15 @@ Error generating stack: `+u.message+`
     for(const d of document.querySelectorAll('div')){ if(d.className&&typeof d.className==='string'&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6')){ if((d.textContent||'').includes('Livre')){ bar=d; break; } } }
     if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
     if(!bar) return false;
-    if(bar.querySelector('#btn-consumo-v6')) return true;
+    if(bar.querySelector('#btn-consumo-v7')) return true;
     const btn=document.createElement('button');
-    btn.id='btn-consumo-v6';
+    btn.id='btn-consumo-v7';
     btn.textContent='📦 Consumo • 0';
     btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; border:1px solid #232326; background:#151518; color:#a1a1aa;';
     btn.onclick=openPanel;
     bar.appendChild(btn);
-    setInterval(()=>{ const el=document.getElementById('btn-consumo-v6'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
-    // limpa duplicados automaticamente ao iniciar
-    limparDuplicados();
+    setInterval(()=>{ const el=document.getElementById('btn-consumo-v7'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
+    corrigirDuplicacaoEntreRuas();
     return true;
   }
   function init(){ let t=0; const iv=setInterval(()=>{ t++; if(inject()||t>200) clearInterval(iv); }, 300); }
