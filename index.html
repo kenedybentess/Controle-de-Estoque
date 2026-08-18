@@ -32,23 +32,73 @@ Error generating stack: `+u.message+`
   
 
 <div id="consumo-root" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:999999; background:#0e0e10; overflow-y:auto;"></div>
-<style>
-  .pill-active{ background:white!important; color:black!important; border-color:white!important; }
-</style>
+<style>.pill-active{ background:white!important; color:black!important; border-color:white!important; }</style>
 <script>
 (function(){
-  console.log('CONSUMO V5 carregado');
   const KEY_MAT="wms_final_materiais", KEY_CONS="wms_final_consumos";
+  
+  // FUNÇÃO DE LIMPEZA - REMOVE DUPLICADOS
+  function limparDuplicados(){
+    try{
+      const raw=localStorage.getItem(KEY_MAT);
+      if(!raw) return;
+      const arr=JSON.parse(raw);
+      const seen=new Map();
+      const cleaned=[];
+      for(const m of arr){
+        const id=String(m.id||m.codigo||m.sku);
+        const key=id+'|'+(m.posicao||m.rua||'')+'|'+(m.sku||'');
+        // se já existe mesmo id + mesma posicao, mescla saldo (soma) e mantém 1
+        if(seen.has(key)){
+          const idx=seen.get(key);
+          // soma saldo se for duplicado real
+          const s1=Number(cleaned[idx].saldo??cleaned[idx].quantidade??0);
+          const s2=Number(m.saldo??m.quantidade??0);
+          // se for duplicado idêntico (mesmo objeto), não soma, só ignora
+          if(JSON.stringify(cleaned[idx])!==JSON.stringify(m)){
+            // mantém maior saldo
+            cleaned[idx].saldo=Math.max(s1,s2);
+            if(cleaned[idx].quantidade!==undefined) cleaned[idx].quantidade=cleaned[idx].saldo;
+          }
+        } else {
+          seen.set(key, cleaned.length);
+          cleaned.push(m);
+        }
+      }
+      // segunda passada: dedup só por ID se tiver 2 com mesmo ID mas posicoes diferentes? Não, mantém posicoes diferentes
+      // mas remove duplicado exato de ID repetido
+      const byId=new Map();
+      const final=[];
+      for(const m of cleaned){
+        const id=String(m.id);
+        if(byId.has(id)){
+          // já existe com mesmo ID, verifica se posicao igual
+          const existing=final[byId.get(id)];
+          if((existing.posicao||'')===(m.posicao||'') && (existing.sku||'')===(m.sku||'')){
+            continue; // duplicado exato
+          }
+        }
+        byId.set(id, final.length);
+        final.push(m);
+      }
+      if(final.length!==arr.length){
+        console.log('[LIMPEZA] Removidos duplicados:', arr.length-final.length);
+        localStorage.setItem(KEY_MAT, JSON.stringify(final));
+      }
+    }catch(e){ console.error('Erro limpeza', e); }
+  }
+
   const getMat=()=>{
+    limparDuplicados();
     try{
       const raw=localStorage.getItem(KEY_MAT);
       if(!raw) return [];
       const arr=JSON.parse(raw);
       return arr.map(m=>{
         let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=m.qtd; if(s===undefined) s=0;
-        return {...m, _saldo: Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||''};
+        return {...m, _saldo:Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||''};
       });
-    }catch(e){ return []; }
+    }catch(e){return []}
   };
   const getCons=()=>{ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return []}};
   const setMat=(mats)=>{
@@ -56,47 +106,55 @@ Error generating stack: `+u.message+`
       const orig=JSON.parse(localStorage.getItem(KEY_MAT)||"[]");
       const map={}; mats.forEach(x=>map[String(x.id)]=x._saldo);
       const upd=orig.map(o=>{ if(map[String(o.id)]!==undefined){ o.saldo=map[String(o.id)]; if(o.quantidade!==undefined) o.quantidade=o.saldo; } return o; });
-      localStorage.setItem(KEY_MAT, JSON.stringify(upd));
+      // dedup antes de salvar
+      const seen=new Set(); const dedup=[];
+      for(const m of upd){ const k=String(m.id); if(!seen.has(k)){ seen.add(k); dedup.push(m); } else { /* ignora duplicado */ } }
+      // na verdade precisa manter posicoes diferentes, então dedup por id+posicao
+      const finalMap=new Map(); const final=[];
+      for(const m of upd){
+        const key=String(m.id)+'|'+(m.posicao||'');
+        if(!finalMap.has(key)){ finalMap.set(key,true); final.push(m); }
+      }
+      localStorage.setItem(KEY_MAT, JSON.stringify(final));
     }catch{ localStorage.setItem(KEY_MAT, JSON.stringify(mats)); }
   };
   const setCons=v=>localStorage.setItem(KEY_CONS, JSON.stringify(v));
 
   function renderPanel(){
     const root=document.getElementById('consumo-root');
-    const mats=getMat();
-    const cons=getCons();
+    const mats=getMat(); const cons=getCons();
     root.innerHTML=`
       <div style="max-width:1440px; margin:0 auto; padding:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
-          <div style="color:#71717a; font-size:11px;">${mats.length} materiais | ${cons.length} consumos</div>
+          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar ao WMS</button>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="c-limpar-dup" style="height:32px; padding:0 12px; border-radius:9999px; background:#7c3aed; color:white; font-size:11px;">Limpar duplicados</button>
+            <div style="color:#71717a; font-size:11px;">${mats.length} materiais | ${cons.length} consumos</div>
+          </div>
         </div>
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; padding:16px;">
-          <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:4px;">CONSUMO - Baixa para Produção</div>
-          <div style="color:#71717a; font-size:11px; margin-bottom:16px;">Funciona offline com localStorage wms_final_materiais - baixa automática</div>
+          <div style="color:white; font-weight:bold; font-size:14px;">CONSUMO - Baixa para Produção</div>
+          <div style="color:#71717a; font-size:11px; margin-bottom:16px;">Dá baixa automática no estoque • Corrigido para não duplicar</div>
           <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap:12px;">
-            <div><label style="font-size:11px; color:#a1a1aa;">Material *</label><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;">${mats.length===0?'<option value="">NENHUM MATERIAL</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select><div id="c-saldo" style="font-size:11px; color:#a78bfa; margin-top:4px; font-weight:bold;"></div></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">Qtd *</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="10"></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option></select></div>
-            <div><label style="font-size:11px; color:#a1a1aa;">OP</label><div style="display:flex; gap:8px; margin-top:4px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP-001"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold; font-size:13px;">BAIXAR</button></div></div>
-            <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs: pago para produção..."></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Material</label><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;">${mats.length===0?'<option value="">NENHUM MATERIAL</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select><div id="c-saldo" style="font-size:11px; color:#a78bfa; margin-top:4px; font-weight:bold;"></div></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Qtd</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="10"></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option></select></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">OP</label><div style="display:flex; gap:8px; margin-top:4px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold;">BAIXAR</button></div></div>
+            <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs..."></div>
           </div>
           <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px; font-size:13px;"></div>
         </div>
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:16px;">
           <div style="padding:12px; border-bottom:1px solid #232326; display:flex; justify-content:space-between;"><b style="color:white; font-size:13px;">Histórico</b><input id="c-busca" placeholder="Buscar..." style="height:32px; border-radius:9999px; background:#0e0e10; border:1px solid #232326; color:white; padding:0 12px; font-size:12px; width:160px;"></div>
-          <div style="overflow-x:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">OP</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
+          <div style="overflow-x:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
         </div>
       </div>
     `;
-    // bind voltar
-    document.getElementById('c-voltar').onclick=closePanel;
+    document.getElementById('c-voltar').onclick=()=>{ document.getElementById('consumo-root').style.display='none'; document.body.style.overflow=''; };
+    document.getElementById('c-limpar-dup').onclick=()=>{ limparDuplicados(); renderPanel(); alert('Duplicados limpos!'); };
     const sel=document.getElementById('c-mat');
     const saldoEl=document.getElementById('c-saldo');
-    const updSaldo=()=>{
-      const m=mats.find(x=>String(x.id)===String(sel.value));
-      if(saldoEl) saldoEl.textContent=m?`Saldo atual: ${m._saldo} ${m.unidade||''}`:'';
-    };
+    const updSaldo=()=>{ const m=mats.find(x=>String(x.id)===String(sel.value)); if(saldoEl) saldoEl.textContent=m?`Saldo: ${m._saldo} ${m.unidade||''}`:''; };
     sel.addEventListener('change', updSaldo); updSaldo();
     const tbody=document.getElementById('c-tbody');
     const busca=document.getElementById('c-busca');
@@ -104,7 +162,7 @@ Error generating stack: `+u.message+`
       let list=[...cons].sort((a,b)=>b.id-a.id);
       const f=(busca.value||'').toLowerCase();
       if(f) list=list.filter(x=>JSON.stringify(x).toLowerCase().includes(f));
-      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.nome}</b><div style="font-size:11px; color:#71717a;">${c.sku}</div></td><td style="padding:10px; color:white; font-weight:bold;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → <b style="color:white;">${c.depois}</b></td><td style="padding:10px;">${c.op||'-'}</td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white; font-size:11px;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="6" style="padding:24px; text-align:center; color:#71717a;">Nenhum consumo</td></tr>';
+      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.nome}</b><div style="font-size:11px; color:#71717a;">${c.sku}</div></td><td style="padding:10px; font-weight:bold;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → <b style="color:white;">${c.depois}</b></td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center; color:#71717a;">Nenhum consumo</td></tr>';
       tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
         if(!confirm('Estornar?')) return;
         const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
@@ -116,72 +174,44 @@ Error generating stack: `+u.message+`
       });
     };
     busca.addEventListener('input', draw); draw();
-
     document.getElementById('c-btn').onclick=()=>{
-      const matId=sel.value;
-      if(!matId){ alert('Selecione material'); return; }
+      const matId=sel.value; if(!matId){ alert('Selecione material'); return; }
       const cur=getMat(); const mat=cur.find(x=>String(x.id)===String(matId));
-      if(!mat){ alert('Material não encontrado'); return; }
+      if(!mat) return;
       const q=Number((document.getElementById('c-qtd').value||'').replace(',','.'));
       if(!q||q<=0){ alert('Qtd inválida'); return; }
-      if(q>mat._saldo){ alert('Saldo insuficiente! Saldo: '+mat._saldo); return; }
+      if(q>mat._saldo){ alert('Saldo insuficiente: '+mat._saldo); return; }
       const antes=mat._saldo, depois=antes-q;
       const idx=cur.findIndex(x=>String(x.id)===String(mat.id)); cur[idx]._saldo=depois; setMat(cur);
-      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, obs:document.getElementById('c-obs').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
+      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
       const all=getCons(); all.push(reg); setCons(all);
-      const msg=document.getElementById('c-msg');
-      msg.textContent=`✅ Baixa feita: ${q} de ${reg.nome} | ${antes} → ${depois}`;
-      msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
-      setTimeout(()=>msg.style.display='none', 5000);
+      const msg=document.getElementById('c-msg'); msg.textContent=`✅ Baixa: ${q} de ${reg.nome} | ${antes} → ${depois}`; msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
       renderPanel();
     };
   }
 
-  function openPanel(){
-    console.log('Abrindo consumo');
-    const root=document.getElementById('consumo-root');
-    renderPanel();
-    root.style.display='block';
-    document.body.style.overflow='hidden';
-  }
-  function closePanel(){
-    const root=document.getElementById('consumo-root');
-    root.style.display='none';
-    document.body.style.overflow='';
-  }
-
-  function injectBtn(){
-    // tenta achar barra
+  function openPanel(){ const r=document.getElementById('consumo-root'); renderPanel(); r.style.display='block'; document.body.style.overflow='hidden'; }
+  function inject(){
     let bar=null;
-    const allDivs=document.querySelectorAll('div');
-    for(const d of allDivs){
-      if(d.className && typeof d.className==='string' && d.className.includes('max-w-[1440px]') && d.className.includes('pt-6')){
-        if((d.textContent||'').includes('Livre')){ bar=d; break; }
-      }
-    }
-    if(!bar){
-      const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre'));
-      if(b) bar=b.parentElement;
-    }
+    for(const d of document.querySelectorAll('div')){ if(d.className&&typeof d.className==='string'&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6')){ if((d.textContent||'').includes('Livre')){ bar=d; break; } } }
+    if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
     if(!bar) return false;
-    if(bar.querySelector('#btn-consumo-v5')) return true;
+    if(bar.querySelector('#btn-consumo-v6')) return true;
     const btn=document.createElement('button');
-    btn.id='btn-consumo-v5';
+    btn.id='btn-consumo-v6';
     btn.textContent='📦 Consumo • 0';
-    btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; font-weight:500; border:1px solid #232326; background:#151518; color:#a1a1aa; display:flex; align-items:center; gap:8px;';
+    btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; border:1px solid #232326; background:#151518; color:#a1a1aa;';
     btn.onclick=openPanel;
     bar.appendChild(btn);
-    setInterval(()=>{ const el=document.getElementById('btn-consumo-v5'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
-    console.log('Botão consumo V5 injetado');
+    setInterval(()=>{ const el=document.getElementById('btn-consumo-v6'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
+    // limpa duplicados automaticamente ao iniciar
+    limparDuplicados();
     return true;
   }
-
-  function init(){
-    let t=0; const iv=setInterval(()=>{ t++; if(injectBtn()||t>200) clearInterval(iv); }, 200);
-  }
+  function init(){ let t=0; const iv=setInterval(()=>{ t++; if(inject()||t>200) clearInterval(iv); }, 300); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.addEventListener('load', init);
-  setTimeout(init, 500);
+  setTimeout(init, 600);
 })();
 </script>
 
