@@ -31,17 +31,13 @@ Error generating stack: `+u.message+`
   <script>(function(){function m(a){var h=a.getAttribute("href");if(!h)return;try{var u=new URL(h,document.baseURI);if((u.protocol==="http:"||u.protocol==="https:")&&u.host!==location.host){a.target="_blank";a.rel="noopener noreferrer";}}catch(e){}}function s(){document.querySelectorAll("a[href]").forEach(m);}if(document.readyState!=="loading"){s();}else{document.addEventListener("DOMContentLoaded",s);}document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(a){m(a);}},true);})();</script>
   
 
-<!-- CONSUMO V4 - FIX PAINEL -->
-<div id="consumo-root" style="display:none; position:relative; z-index:9999; background:#0e0e10; min-height:70vh;"></div>
+<div id="consumo-root" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:999999; background:#0e0e10; overflow-y:auto;"></div>
 <style>
-  #consumo-root{display:none}
-  #consumo-root.ativo{display:block!important}
-  .consumo-panel{max-width:1440px;margin:0 auto;padding:24px 16px;}
   .pill-active{ background:white!important; color:black!important; border-color:white!important; }
-  main.escondido{display:none!important}
 </style>
 <script>
 (function(){
+  console.log('CONSUMO V5 carregado');
   const KEY_MAT="wms_final_materiais", KEY_CONS="wms_final_consumos";
   const getMat=()=>{
     try{
@@ -49,14 +45,10 @@ Error generating stack: `+u.message+`
       if(!raw) return [];
       const arr=JSON.parse(raw);
       return arr.map(m=>{
-        let s = m.saldo;
-        if(s===undefined) s=m.quantidade;
-        if(s===undefined) s=m.qtd;
-        if(s===undefined) s=m.estoque;
-        if(s===undefined) s=0;
-        return {...m, _saldo: Number(String(s).replace(',','.'))||0, _nome: m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku: m.sku||m.codigo||''};
+        let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=m.qtd; if(s===undefined) s=0;
+        return {...m, _saldo: Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||''};
       });
-    }catch(e){return []}
+    }catch(e){ return []; }
   };
   const getCons=()=>{ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return []}};
   const setMat=(mats)=>{
@@ -66,181 +58,130 @@ Error generating stack: `+u.message+`
       const upd=orig.map(o=>{ if(map[String(o.id)]!==undefined){ o.saldo=map[String(o.id)]; if(o.quantidade!==undefined) o.quantidade=o.saldo; } return o; });
       localStorage.setItem(KEY_MAT, JSON.stringify(upd));
     }catch{ localStorage.setItem(KEY_MAT, JSON.stringify(mats)); }
-    // força sincronização firebase se houver
-    localStorage.setItem('_wms_last_update', Date.now());
   };
   const setCons=v=>localStorage.setItem(KEY_CONS, JSON.stringify(v));
 
-  function render(){
+  function renderPanel(){
     const root=document.getElementById('consumo-root');
-    if(!root) return;
     const mats=getMat();
     const cons=getCons();
     root.innerHTML=`
-      <div class="consumo-panel space-y-4">
-        <div class="bg-[#151518] border border-[#232326] rounded-2xl p-4 md:p-5">
-          <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-3">
-              <div class="h-9 w-9 rounded-xl bg-violet-600 flex items-center justify-center text-white font-bold">C</div>
-              <div>
-                <div class="text-[14px] font-bold text-white">CONSUMO - Baixa para Produção</div>
-                <div class="text-[11px] text-zinc-400">Materiais lidos: ${mats.length} | O que for registrado aqui dá baixa automática no estoque</div>
-              </div>
-            </div>
-            <div class="text-[11px] text-zinc-400 border border-[#232326] rounded-full px-3 py-1.5">${cons.length} registros</div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div class="md:col-span-5">
-              <label class="text-[11px] text-zinc-400 font-medium">Material *</label>
-              <select id="c-mat" class="mt-1.5 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3 outline-none focus:border-violet-500/50">
-                ${mats.length===0?'<option value="">NENHUM MATERIAL - Cadastre em Estoque</option>':'<option value="">Selecione o material...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | SALDO: ${m._saldo} ${m.unidade||''}</option>`).join('')}
-              </select>
-              <div id="c-saldo-info" class="mt-2 text-[12px] font-bold text-violet-300"></div>
-            </div>
-            <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 font-medium">Qtd a baixar *</label>
-              <input id="c-qtd" type="number" inputmode="decimal" class="mt-1.5 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[14px] px-3 outline-none" placeholder="Ex: 10">
-            </div>
-            <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 font-medium">Tipo</label>
-              <select id="c-tipo" class="mt-1.5 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3">
-                <option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option>
-              </select>
-            </div>
-            <div class="md:col-span-3">
-              <label class="text-[11px] text-zinc-400 font-medium">OP / Destino</label>
-              <div class="mt-1.5 flex gap-2">
-                <input id="c-op" class="flex-1 h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="OP-001">
-                <button id="c-btn" class="h-11 px-7 rounded-full bg-white text-black font-bold text-[13px] hover:bg-zinc-200 transition">BAIXAR</button>
-              </div>
-            </div>
-            <div class="md:col-span-12">
-              <input id="c-obs" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[12px] px-3" placeholder="Observação: pago para produção...">
-            </div>
-          </div>
-          <div id="c-msg" class="hidden mt-4 p-3 rounded-xl text-[13px] font-medium"></div>
+      <div style="max-width:1440px; margin:0 auto; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
+          <div style="color:#71717a; font-size:11px;">${mats.length} materiais | ${cons.length} consumos</div>
         </div>
-
-        <div class="bg-[#151518] border border-[#232326] rounded-2xl overflow-hidden">
-          <div class="p-3 flex items-center justify-between border-b border-[#232326]">
-            <div class="text-[13px] font-bold text-white">Histórico de Baixas</div>
-            <input id="c-busca" placeholder="Filtrar..." class="h-8 rounded-full bg-[#0e0e10] border border-[#232326] text-white text-[12px] px-3 w-[160px]">
+        <div style="background:#151518; border:1px solid #232326; border-radius:16px; padding:16px;">
+          <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:4px;">CONSUMO - Baixa para Produção</div>
+          <div style="color:#71717a; font-size:11px; margin-bottom:16px;">Funciona offline com localStorage wms_final_materiais - baixa automática</div>
+          <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap:12px;">
+            <div><label style="font-size:11px; color:#a1a1aa;">Material *</label><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;">${mats.length===0?'<option value="">NENHUM MATERIAL</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select><div id="c-saldo" style="font-size:11px; color:#a78bfa; margin-top:4px; font-weight:bold;"></div></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Qtd *</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="10"></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option></select></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">OP</label><div style="display:flex; gap:8px; margin-top:4px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP-001"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold; font-size:13px;">BAIXAR</button></div></div>
+            <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs: pago para produção..."></div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-[12px]"><thead class="text-[11px] text-zinc-500 border-b border-[#232326]"><tr><th class="p-3 text-left">Data</th><th class="p-3 text-left">Material</th><th class="p-3 text-left">Qtd</th><th class="p-3 text-left">Tipo</th><th class="p-3 text-left">Antes→Depois</th><th class="p-3 text-left">OP</th><th class="p-3 text-left">Ação</th></tr></thead><tbody id="c-tbody" class="text-zinc-300"></tbody></table>
-          </div>
+          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px; font-size:13px;"></div>
+        </div>
+        <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:16px;">
+          <div style="padding:12px; border-bottom:1px solid #232326; display:flex; justify-content:space-between;"><b style="color:white; font-size:13px;">Histórico</b><input id="c-busca" placeholder="Buscar..." style="height:32px; border-radius:9999px; background:#0e0e10; border:1px solid #232326; color:white; padding:0 12px; font-size:12px; width:160px;"></div>
+          <div style="overflow-x:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">OP</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
         </div>
       </div>
     `;
-    // eventos
+    // bind voltar
+    document.getElementById('c-voltar').onclick=closePanel;
     const sel=document.getElementById('c-mat');
-    const saldoInfo=document.getElementById('c-saldo-info');
-    const updateSaldo=()=>{
-      const chosen=mats.find(x=>String(x.id)===String(sel.value));
-      if(saldoInfo) saldoInfo.textContent=chosen?`Saldo atual: ${chosen._saldo} ${chosen.unidade||''} | ${chosen._sku}`:'';
+    const saldoEl=document.getElementById('c-saldo');
+    const updSaldo=()=>{
+      const m=mats.find(x=>String(x.id)===String(sel.value));
+      if(saldoEl) saldoEl.textContent=m?`Saldo atual: ${m._saldo} ${m.unidade||''}`:'';
     };
-    sel?.addEventListener('change', updateSaldo);
-    updateSaldo();
-
+    sel.addEventListener('change', updSaldo); updSaldo();
     const tbody=document.getElementById('c-tbody');
     const busca=document.getElementById('c-busca');
-    const drawTable=()=>{
+    const draw=()=>{
       let list=[...cons].sort((a,b)=>b.id-a.id);
-      const f=(busca?.value||'').toLowerCase();
+      const f=(busca.value||'').toLowerCase();
       if(f) list=list.filter(x=>JSON.stringify(x).toLowerCase().includes(f));
-      if(tbody){
-        tbody.innerHTML=list.map(c=>`<tr class="border-b border-[#1e1e22] hover:bg-[#1c1c1f]"><td class="p-3">${c.data}</td><td class="p-3"><b class="text-white">${c.nome}</b><div class="text-[11px] text-zinc-500">${c.sku}</div></td><td class="p-3 text-white font-bold">-${c.qtd}</td><td class="p-3"><span class="px-2 py-1 rounded-full bg-violet-500/15 border border-violet-500/30 text-[11px]">${c.tipo}</span></td><td class="p-3">${c.antes} → <b class="text-white">${c.depois}</b></td><td class="p-3">${c.op||'-'}</td><td class="p-3"><button data-id="${c.id}" class="btn-est h-7 px-3 rounded-full bg-[#232326] hover:bg-red-900/50 text-[11px]">Estornar</button></td></tr>`).join('')||'<tr><td colspan="7" class="p-8 text-center text-zinc-500">Nenhum consumo registrado ainda</td></tr>';
-        tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
-          if(!confirm('Estornar e devolver ao estoque?')) return;
-          const id=b.dataset.id;
-          const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
-          if(!it) return;
-          const curMats=getMat(); const idx=curMats.findIndex(x=>String(x.id)===String(it.materialId));
-          if(idx>-1){ curMats[idx]._saldo+=Number(it.qtd); setMat(curMats); }
-          setCons(all.filter(x=>String(x.id)!==String(id)));
-          render();
-        });
-      }
+      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.nome}</b><div style="font-size:11px; color:#71717a;">${c.sku}</div></td><td style="padding:10px; color:white; font-weight:bold;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → <b style="color:white;">${c.depois}</b></td><td style="padding:10px;">${c.op||'-'}</td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white; font-size:11px;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="6" style="padding:24px; text-align:center; color:#71717a;">Nenhum consumo</td></tr>';
+      tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
+        if(!confirm('Estornar?')) return;
+        const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
+        if(!it) return;
+        const cur=getMat(); const idx=cur.findIndex(x=>String(x.id)===String(it.materialId));
+        if(idx>-1){ cur[idx]._saldo+=Number(it.qtd); setMat(cur); }
+        setCons(all.filter(x=>String(x.id)!==String(id)));
+        renderPanel();
+      });
     };
-    busca?.addEventListener('input', drawTable);
-    drawTable();
+    busca.addEventListener('input', draw); draw();
 
-    const btn=document.getElementById('c-btn');
-    btn.onclick=()=>{
+    document.getElementById('c-btn').onclick=()=>{
       const matId=sel.value;
-      if(!matId){ alert('Selecione o material'); return; }
-      const curMats=getMat();
-      const mat=curMats.find(x=>String(x.id)===String(matId));
+      if(!matId){ alert('Selecione material'); return; }
+      const cur=getMat(); const mat=cur.find(x=>String(x.id)===String(matId));
       if(!mat){ alert('Material não encontrado'); return; }
-      const q=Number((document.getElementById('c-qtd').value||'').toString().replace(',','.'));
+      const q=Number((document.getElementById('c-qtd').value||'').replace(',','.'));
       if(!q||q<=0){ alert('Qtd inválida'); return; }
       if(q>mat._saldo){ alert('Saldo insuficiente! Saldo: '+mat._saldo); return; }
-      const antes=mat._saldo; const depois=antes-q;
-      const idx=curMats.findIndex(x=>String(x.id)===String(mat.id));
-      curMats[idx]._saldo=depois;
-      setMat(curMats);
+      const antes=mat._saldo, depois=antes-q;
+      const idx=cur.findIndex(x=>String(x.id)===String(mat.id)); cur[idx]._saldo=depois; setMat(cur);
       const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, obs:document.getElementById('c-obs').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
-      const allCons=getCons(); allCons.push(reg); setCons(allCons);
-      document.getElementById('c-qtd').value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
+      const all=getCons(); all.push(reg); setCons(all);
       const msg=document.getElementById('c-msg');
-      msg.textContent=`✅ BAIXA FEITA: ${q} de ${reg.nome} | ${antes} → ${depois} | Novo saldo: ${depois}`;
-      msg.className='mt-4 p-3 rounded-xl text-[13px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-200';
-      msg.classList.remove('hidden');
-      setTimeout(()=>msg.classList.add('hidden'), 6000);
-      render();
+      msg.textContent=`✅ Baixa feita: ${q} de ${reg.nome} | ${antes} → ${depois}`;
+      msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
+      setTimeout(()=>msg.style.display='none', 5000);
+      renderPanel();
     };
   }
 
-  function inject(){
-    const bars=Array.from(document.querySelectorAll('div')).filter(d=>d.className&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6'));
+  function openPanel(){
+    console.log('Abrindo consumo');
+    const root=document.getElementById('consumo-root');
+    renderPanel();
+    root.style.display='block';
+    document.body.style.overflow='hidden';
+  }
+  function closePanel(){
+    const root=document.getElementById('consumo-root');
+    root.style.display='none';
+    document.body.style.overflow='';
+  }
+
+  function injectBtn(){
+    // tenta achar barra
     let bar=null;
-    for(const d of bars){ if((d.textContent||'').includes('Livre') && (d.textContent||'').includes('Estoque')){ bar=d; break; } }
-    if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
-    if(!bar) return false;
-    if(bar.querySelector('#btn-consumo-v4')) return true;
-    const btn=document.createElement('button');
-    btn.id='btn-consumo-v4';
-    btn.className='h-9 px-5 rounded-full text-[13px] font-medium border flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white';
-    btn.innerHTML='📦 Consumo • <span id="pill-count">0</span>';
-    btn.onclick=()=>{
-      const main=document.querySelector('main');
-      const root=document.getElementById('consumo-root');
-      const footer=document.querySelector('footer');
-      const isOpen=root.classList.contains('ativo');
-      // reset visual pills
-      bar.querySelectorAll('button').forEach(b=>{ b.classList.remove('pill-active','bg-white','text-black','border-white'); if(!b.id.includes('consumo')){ b.classList.add('bg-[#151518]','border-[#232326]','text-zinc-400'); } });
-      if(isOpen){
-        root.classList.remove('ativo');
-        root.style.display='none';
-        if(main){ main.classList.remove('escondido'); main.style.display=''; }
-        if(footer) footer.style.display='';
-      }else{
-        render();
-        root.classList.add('ativo');
-        root.style.display='block';
-        if(main){ main.classList.add('escondido'); main.style.display='none'; }
-        // footer mantém
-        btn.classList.add('pill-active');
-        btn.classList.remove('bg-[#151518]','border-[#232326]','text-zinc-400');
-        // atualiza count
-        const c=getCons().length;
-        const el=document.getElementById('pill-count'); if(el) el.textContent=c;
+    const allDivs=document.querySelectorAll('div');
+    for(const d of allDivs){
+      if(d.className && typeof d.className==='string' && d.className.includes('max-w-[1440px]') && d.className.includes('pt-6')){
+        if((d.textContent||'').includes('Livre')){ bar=d; break; }
       }
-    };
+    }
+    if(!bar){
+      const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre'));
+      if(b) bar=b.parentElement;
+    }
+    if(!bar) return false;
+    if(bar.querySelector('#btn-consumo-v5')) return true;
+    const btn=document.createElement('button');
+    btn.id='btn-consumo-v5';
+    btn.textContent='📦 Consumo • 0';
+    btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; font-weight:500; border:1px solid #232326; background:#151518; color:#a1a1aa; display:flex; align-items:center; gap:8px;';
+    btn.onclick=openPanel;
     bar.appendChild(btn);
-    // atualiza count periodicamente
-    setInterval(()=>{ const el=document.getElementById('pill-count'); if(el) el.textContent=getCons().length; }, 1000);
+    setInterval(()=>{ const el=document.getElementById('btn-consumo-v5'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
+    console.log('Botão consumo V5 injetado');
     return true;
   }
 
   function init(){
-    let tries=0; const iv=setInterval(()=>{ tries++; if(inject()||tries>120) clearInterval(iv); }, 300);
+    let t=0; const iv=setInterval(()=>{ t++; if(injectBtn()||t>200) clearInterval(iv); }, 200);
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.addEventListener('load', init);
-  setTimeout(init, 600);
-  setTimeout(init, 2000);
+  setTimeout(init, 500);
 })();
 </script>
 
