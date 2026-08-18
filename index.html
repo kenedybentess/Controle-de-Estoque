@@ -31,192 +31,234 @@ Error generating stack: `+u.message+`
   <script>(function(){function m(a){var h=a.getAttribute("href");if(!h)return;try{var u=new URL(h,document.baseURI);if((u.protocol==="http:"||u.protocol==="https:")&&u.host!==location.host){a.target="_blank";a.rel="noopener noreferrer";}}catch(e){}}function s(){document.querySelectorAll("a[href]").forEach(m);}if(document.readyState!=="loading"){s();}else{document.addEventListener("DOMContentLoaded",s);}document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(a){m(a);}},true);})();</script>
   
 
-<!-- INJEÇÃO ABA CONSUMO V2 - CORRIGIDO -->
-<div id="consumo-root" style="display:none;"></div>
-<style id="consumo-styles">
+<!-- CONSUMO V3 - FUNCIONALIDADES CORRIGIDAS -->
+<div id="consumo-root" style="display:none; min-height:60vh;"></div>
+<style>
   .consumo-panel{max-width:1440px;margin:0 auto;padding:24px 16px;}
-  @media(min-width:768px){.consumo-panel{padding:24px 24px}}
-  .pill-active{ background:white!important; color:black!important; border-color:white!important; box-shadow:0 1px 2px rgba(0,0,0,.1)!important; }
+  .pill-active{ background:white!important; color:black!important; border-color:white!important; }
 </style>
 <script>
 (function(){
+  console.log('[CONSUMO V3] iniciando');
   const KEY_MAT="wms_final_materiais", KEY_CONS="wms_final_consumos";
-  const loadMat=()=>{try{return JSON.parse(localStorage.getItem(KEY_MAT)||"[]")}catch{return[]}};
-  const loadCons=()=>{try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return[]}};
-  const saveMat=v=>{localStorage.setItem(KEY_MAT,JSON.stringify(v))};
-  const saveCons=v=>{localStorage.setItem(KEY_CONS,JSON.stringify(v))};
+  const getMat=()=>{
+    try{
+      const raw=localStorage.getItem(KEY_MAT);
+      if(!raw) return [];
+      const arr=JSON.parse(raw);
+      // normaliza saldo
+      return arr.map(m=>{
+        let saldo = m.saldo;
+        if(saldo===undefined) saldo = m.quantidade;
+        if(saldo===undefined) saldo = m.qtd;
+        if(saldo===undefined) saldo = m.estoque;
+        if(saldo===undefined) saldo = 0;
+        return {...m, _saldo: Number(saldo)||0 };
+      });
+    }catch(e){ console.error(e); return []; }
+  };
+  const getCons=()=>{ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return []}};
+  const setMat=v=>{
+    // salva mantendo formato original
+    try{
+      const orig=JSON.parse(localStorage.getItem(KEY_MAT)||"[]");
+      // atualiza saldo no orig
+      const map={}; v.forEach(x=>map[String(x.id)]=x._saldo);
+      const updated=orig.map(o=>{ if(map[String(o.id)]!==undefined){ o.saldo=map[String(o.id)]; if(o.quantidade!==undefined) o.quantidade=o.saldo; } return o; });
+      localStorage.setItem(KEY_MAT, JSON.stringify(updated));
+    }catch(e){ localStorage.setItem(KEY_MAT, JSON.stringify(v)); }
+  };
+  const setCons=v=>localStorage.setItem(KEY_CONS, JSON.stringify(v));
 
-  function buildUI(){
+  function build(){
     const root=document.getElementById('consumo-root');
-    if(!root || root.dataset.built) return;
-    root.dataset.built="1";
+    if(!root) return;
+    if(root.dataset.done) return;
+    root.dataset.done="1";
     root.innerHTML=`
       <div class="consumo-panel space-y-4">
         <div class="bg-[#151518] border border-[#232326] rounded-2xl p-4">
-          <div class="flex items-center gap-2 mb-4">
-            <div class="h-8 w-8 rounded-lg bg-[#0e0e10] border border-[#232326] flex items-center justify-center">📦</div>
+          <div class="flex items-center justify-between mb-3">
             <div>
-              <div class="text-[13px] font-semibold text-white">Consumo • Baixa para Produção</div>
-              <div class="text-[11px] text-zinc-500">O que foi pago/uso para produção - baixa automática no estoque</div>
+              <div class="text-[14px] font-bold text-white">CONSUMO - Baixa para Produção</div>
+              <div class="text-[11px] text-zinc-500">Selecione o material, informe qtd e registre. Baixa automática no estoque.</div>
             </div>
+            <div class="text-[11px] text-zinc-500 border border-[#232326] rounded-full px-3 py-1"><span id="c-total">0</span> registros</div>
           </div>
+          <div id="c-debug" class="text-[10px] text-zinc-600 mb-2"></div>
           <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div class="md:col-span-4">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Material *</label>
-              <select id="c-mat" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3"></select>
-              <div id="c-saldo" class="text-[11px] text-zinc-500 mt-1"></div>
+            <div class="md:col-span-5">
+              <label class="text-[11px] text-zinc-400">Material *</label>
+              <select id="c-mat" class="mt-1 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3"></select>
+              <div id="c-saldo" class="text-[11px] text-violet-300 mt-1 font-medium"></div>
             </div>
             <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Qtd *</label>
-              <input id="c-qtd" type="number" step="any" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="0">
+              <label class="text-[11px] text-zinc-400">Qtd *</label>
+              <input id="c-qtd" type="number" step="0.01" class="mt-1 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white px-3" placeholder="Ex: 10">
             </div>
             <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Tipo</label>
-              <select id="c-tipo" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3">
-                <option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option>
+              <label class="text-[11px] text-zinc-400">Tipo</label>
+              <select id="c-tipo" class="mt-1 w-full h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white px-3">
+                <option value="Produção">Produção</option>
+                <option value="Perda">Perda</option>
+                <option value="Amostra">Amostra</option>
+                <option value="Ajuste">Ajuste</option>
               </select>
             </div>
-            <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">OP</label>
-              <input id="c-op" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="OP-123">
+            <div class="md:col-span-3">
+              <label class="text-[11px] text-zinc-400">OP / Ordem</label>
+              <div class="mt-1 flex gap-2">
+                <input id="c-op" class="flex-1 h-11 rounded-xl bg-[#0e0e10] border border-[#232326] text-white px-3" placeholder="OP-001">
+                <button id="c-btn" class="h-11 px-6 rounded-full bg-violet-600 hover:bg-violet-500 text-white font-bold text-[13px] whitespace-nowrap">BAIXAR</button>
+              </div>
             </div>
-            <div class="md:col-span-2">
-              <label class="text-[11px] text-zinc-400 mb-1 block">Data</label>
-              <input id="c-data" type="date" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3">
-            </div>
-            <div class="md:col-span-10">
-              <input id="c-obs" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[13px] px-3" placeholder="Observação: pago para produção lote...">
-            </div>
-            <div class="md:col-span-2">
-              <button id="c-btn" class="w-full h-10 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-[13px] font-bold">Registrar Baixa</button>
+            <div class="md:col-span-12">
+              <input id="c-obs" class="w-full h-10 rounded-xl bg-[#0e0e10] border border-[#232326] text-white text-[12px] px-3" placeholder="Observação (opcional) - ex: pago para produção lote A">
             </div>
           </div>
-          <div id="c-msg" class="hidden mt-3 text-[12px] p-3 rounded-xl"></div>
+          <div id="c-msg" class="hidden mt-3 p-3 rounded-xl text-[12px]"></div>
         </div>
         <div class="bg-[#151518] border border-[#232326] rounded-2xl overflow-hidden">
-          <div class="p-3 flex justify-between items-center border-b border-[#232326]">
-            <span class="text-white text-[13px] font-semibold">Histórico (<span id="c-count">0</span>)</span>
-            <input id="c-busca" placeholder="Buscar..." class="h-8 w-[180px] rounded-full bg-[#0e0e10] border border-[#232326] text-[12px] px-3 text-white">
+          <div class="p-3 flex items-center justify-between border-b border-[#232326]">
+            <b class="text-white text-[13px]">Histórico</b>
+            <input id="c-busca" placeholder="Buscar..." class="h-8 rounded-full bg-[#0e0e10] border border-[#232326] text-white text-[12px] px-3 w-[160px]">
           </div>
-          <div class="overflow-x-auto"><table class="w-full text-[12px]"><thead class="text-[11px] text-zinc-500 border-b border-[#232326]"><tr><th class="text-left p-2.5">Data</th><th class="text-left p-2.5">Material</th><th class="text-left p-2.5">Qtd</th><th class="text-left p-2.5">Tipo</th><th class="text-left p-2.5">OP</th><th class="text-left p-2.5">Antes→Depois</th><th class="text-left p-2.5">Ação</th></tr></thead><tbody id="c-tbody" class="text-zinc-300"></tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full text-[12px]"><thead class="text-[11px] text-zinc-500 border-b border-[#232326]"><tr><th class="p-2.5 text-left">Data</th><th class="p-2.5 text-left">Material</th><th class="p-2.5 text-left">Qtd</th><th class="p-2.5 text-left">Tipo</th><th class="p-2.5 text-left">Antes→Depois</th><th class="p-2.5 text-left">OP</th><th class="p-2.5 text-left">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
         </div>
-      </div>`;
-    document.getElementById('c-data').valueAsDate=new Date();
+      </div>
+    `;
+    document.getElementById('c-data')?.remove(); // não precisa
+    // cria data hidden com hoje
+    if(!document.getElementById('c-data-hid')){
+      const d=document.createElement('input'); d.type='hidden'; d.id='c-data-hid'; d.value=new Date().toISOString().slice(0,10); root.appendChild(d);
+    }
     bind();
     refresh();
-    setInterval(refresh, 2000);
+    setInterval(refresh, 1500);
   }
 
   function refresh(){
+    const mats=getMat();
+    const cons=getCons();
     const sel=document.getElementById('c-mat');
+    const debug=document.getElementById('c-debug');
+    if(debug) debug.textContent = `Materiais encontrados: ${mats.length} | KEY: ${KEY_MAT} | Exemplo: ${mats[0]?JSON.stringify(mats[0]).slice(0,120):'vazio'}`;
     if(!sel) return;
-    const mats=loadMat();
     const cur=sel.value;
-    sel.innerHTML='<option value="">Selecione material...</option>'+mats.map(m=>{const s=m.saldo??m.quantidade??0; return `<option value="${m.id}">${(m.sku||m.codigo||'') } - ${m.nome||m.descricao||'Sem nome'} | Saldo: ${s} ${m.unidade||''}</option>`}).join('');
+    if(mats.length===0){
+      sel.innerHTML='<option value="">Nenhum material no estoque - cadastre em Estoque</option>';
+    } else {
+      sel.innerHTML='<option value="">Selecione...</option>'+mats.map(m=>{
+        const nome=m.nome||m.descricao||m.codigo||m.sku||'Sem nome';
+        const sku=m.sku||m.codigo||'';
+        return `<option value="${m.id}">${sku} - ${nome} | Saldo: ${m._saldo} ${m.unidade||''}</option>`;
+      }).join('');
+    }
     if(cur) sel.value=cur;
-    const hint=document.getElementById('c-saldo');
     const chosen=mats.find(x=>String(x.id)===String(sel.value));
-    if(hint){ hint.textContent=chosen?`Saldo atual: ${chosen.saldo??chosen.quantidade??0} ${chosen.unidade||''}`:''; }
+    const saldoEl=document.getElementById('c-saldo');
+    if(saldoEl) saldoEl.textContent = chosen ? `Saldo atual: ${chosen._saldo} ${chosen.unidade||''}` : '';
 
-    // table
     const tbody=document.getElementById('c-tbody');
     const busca=(document.getElementById('c-busca')?.value||'').toLowerCase();
-    let cons=loadCons().sort((a,b)=>b.id-a.id);
-    if(busca) cons=cons.filter(c=>JSON.stringify(c).toLowerCase().includes(busca));
-    document.getElementById('c-count').textContent=loadCons().length;
+    let filtered=[...cons].sort((a,b)=>b.id-a.id);
+    if(busca) filtered=filtered.filter(c=>JSON.stringify(c).toLowerCase().includes(busca));
+    document.getElementById('c-total').textContent=cons.length;
     const pill=document.getElementById('pill-cons-count');
-    if(pill) pill.textContent=loadCons().length;
-    tbody.innerHTML=cons.map(c=>`<tr class="border-b border-[#1e1e22]"><td class="p-2.5">${c.data}</td><td class="p-2.5 text-white">${c.nome}<div class="text-[11px] text-zinc-500">${c.sku}</div></td><td class="p-2.5 text-white">-${c.qtd}</td><td class="p-2.5"><span class="px-2 py-0.5 rounded-full border text-[11px] bg-violet-500/15 border-violet-500/30">${c.tipo}</span></td><td class="p-2.5">${c.op||'-'}</td><td class="p-2.5">${c.saldoAnterior} → ${c.saldoNovo}</td><td class="p-2.5"><button data-id="${c.id}" class="btn-est h-6 px-2 rounded-full bg-[#232326] text-[11px]">Estornar</button></td></tr>`).join('')||'<tr><td colspan="7" class="p-6 text-center text-zinc-500">Nenhum consumo</td></tr>';
-    tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
-      if(!confirm('Estornar e devolver ao estoque?')) return;
-      const id=b.dataset.id;
-      const cons=loadCons(); const it=cons.find(x=>String(x.id)===String(id));
-      if(!it) return;
-      const mats=loadMat(); const idx=mats.findIndex(x=>String(x.id)===String(it.materialId));
-      if(idx>-1){ mats[idx].saldo=(Number(mats[idx].saldo??0)+Number(it.qtd)); if(mats[idx].quantidade!==undefined) mats[idx].quantidade=mats[idx].saldo; saveMat(mats); }
-      saveCons(cons.filter(x=>String(x.id)!==String(id)));
-      refresh();
+    if(pill) pill.textContent=cons.length;
+
+    if(!tbody) return;
+    tbody.innerHTML = filtered.map(c=>`<tr class="border-b border-[#1e1e22] hover:bg-[#1c1c1f]"><td class="p-2.5">${c.data}</td><td class="p-2.5 text-white">${c.nome}<div class="text-[11px] text-zinc-500">${c.sku}</div></td><td class="p-2.5 text-white font-bold">-${c.qtd}</td><td class="p-2.5">${c.tipo}</td><td class="p-2.5">${c.antes} → <b class="text-white">${c.depois}</b></td><td class="p-2.5">${c.op||'-'}</td><td class="p-2.5"><button data-id="${c.id}" class="btn-est h-6 px-2 rounded-full bg-[#232326] text-[11px]">Estornar</button></td></tr>`).join('') || '<tr><td colspan="7" class="p-6 text-center text-zinc-500">Nenhum consumo ainda</td></tr>';
+    tbody.querySelectorAll('.btn-est').forEach(b=>{
+      b.onclick=()=>{
+        if(!confirm('Estornar e devolver ao estoque?')) return;
+        const id=b.dataset.id;
+        const all=getCons();
+        const item=all.find(x=>String(x.id)===String(id));
+        if(!item) return;
+        const mats=getMat();
+        const idx=mats.findIndex(x=>String(x.id)===String(item.materialId));
+        if(idx>-1){
+          mats[idx]._saldo = Number(mats[idx]._saldo)+Number(item.qtd);
+          setMat(mats);
+        }
+        setCons(all.filter(x=>String(x.id)!==String(id)));
+        refresh();
+      };
     });
   }
 
   function bind(){
     const btn=document.getElementById('c-btn');
-    if(!btn || btn.dataset.b) return;
-    btn.dataset.b="1";
+    if(!btn || btn.dataset.ok) return;
+    btn.dataset.ok="1";
     document.getElementById('c-mat')?.addEventListener('change', refresh);
     document.getElementById('c-busca')?.addEventListener('input', refresh);
     btn.onclick=()=>{
-      const mats=loadMat();
+      const mats=getMat();
       const sel=document.getElementById('c-mat');
-      const m=mats.find(x=>String(x.id)===String(sel.value));
-      if(!m){ alert('Selecione material'); return; }
-      const q=Number(document.getElementById('c-qtd').value.replace(',','.'));
+      const mat=mats.find(x=>String(x.id)===String(sel.value));
+      if(!mat){ alert('Selecione material'); return; }
+      const qtdEl=document.getElementById('c-qtd');
+      const q=Number((qtdEl.value||'').replace(',','.'));
       if(!q||q<=0){ alert('Qtd inválida'); return; }
-      const saldo=Number(m.saldo??m.quantidade??0);
+      if(q>mat._saldo){ alert('Saldo insuficiente! Saldo: '+mat._saldo); return; }
       const tipo=document.getElementById('c-tipo').value;
-      if(tipo==='Produção' && q>saldo){ alert('Saldo insuficiente! Saldo: '+saldo); return; }
-      const idx=mats.findIndex(x=>String(x.id)===String(m.id));
-      const ant=saldo, novo=saldo-q;
-      mats[idx].saldo=novo; if(mats[idx].quantidade!==undefined) mats[idx].quantidade=novo;
-      saveMat(mats);
-      const reg={id:Date.now(), materialId:m.id, sku:m.sku||m.codigo||'', nome:m.nome||m.descricao||'', qtd:q, tipo, op:document.getElementById('c-op').value, data:document.getElementById('c-data').value||new Date().toISOString().slice(0,10), saldoAnterior:ant, saldoNovo:novo, obs:document.getElementById('c-obs').value};
-      const cons=loadCons(); cons.push(reg); saveCons(cons);
-      document.getElementById('c-qtd').value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
-      refresh();
+      const op=document.getElementById('c-op').value;
+      const obs=document.getElementById('c-obs').value;
+      const antes=mat._saldo;
+      const depois=antes-q;
+      // atualiza
+      const idx=mats.findIndex(x=>String(x.id)===String(mat.id));
+      mats[idx]._saldo=depois;
+      setMat(mats);
+      // registra
+      const reg={id:Date.now(), materialId:mat.id, sku:mat.sku||mat.codigo||'', nome:mat.nome||mat.descricao||'', qtd:q, tipo, op, obs, data:new Date().toISOString().slice(0,10), antes, depois};
+      const cons=getCons(); cons.push(reg); setCons(cons);
+      // limpa
+      qtdEl.value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
       const msg=document.getElementById('c-msg');
-      msg.textContent=`Baixa de ${q} de ${reg.nome} • Novo saldo: ${novo}`;
-      msg.className='mt-3 text-[12px] p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200';
+      msg.textContent=`✅ Baixa de ${q} de ${reg.nome} | ${antes} → ${depois}`;
+      msg.className='mt-3 p-3 rounded-xl text-[12px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-200';
       msg.classList.remove('hidden');
-      setTimeout(()=>msg.classList.add('hidden'),4000);
-      // força React perceber mudança
+      setTimeout(()=>msg.classList.add('hidden'), 5000);
+      refresh();
+      // dispara evento para React original recarregar estoque
       window.dispatchEvent(new Event('storage'));
+      // força reload visual do estoque se estiver na aba estoque (opcional)
+      try{ if(window.location.hash==='#estoque') location.reload(); }catch{}
     };
   }
 
-  function injectPill(){
-    // Acha barra de abas pelo texto Livre e Estoque
-    const allDivs=document.querySelectorAll('div');
+  function injectBtn(){
+    // procura barra que tem Livre
+    const candidates = Array.from(document.querySelectorAll('div')).filter(d=>d.className&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6'));
     let bar=null;
-    for(const d of allDivs){
-      const t=d.textContent||'';
-      // barra tem Livre e Estoque e é flex com gap-2
-      if(t.includes('Livre') && t.includes('Estoque') && d.className.includes('flex') && d.className.includes('gap-2') && d.children.length>=2){
-        // evita pegar div grande demais
-        if(d.className.includes('max-w-[1440px]') && d.className.includes('pt-6')){
-          bar=d; break;
-        }
-      }
-    }
+    for(const d of candidates){ if((d.textContent||'').includes('Livre') && (d.textContent||'').includes('Estoque')){ bar=d; break; } }
     if(!bar){
-      // fallback: procura por botão com texto Livre
-      const btns=document.querySelectorAll('button');
-      for(const b of btns){ if(b.textContent.includes('Livre')){ bar=b.parentElement; break; } }
+      const btns=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Livre'));
+      if(btns) bar=btns.parentElement;
     }
     if(!bar) return false;
-    if(bar.querySelector('#btn-consumo-pill')) return true;
-
+    if(bar.querySelector('#btn-consumo')) return true;
     const btn=document.createElement('button');
-    btn.id='btn-consumo-pill';
-    btn.setAttribute('data-consumo-btn','1');
-    btn.className='h-9 px-5 rounded-full text-[13px] font-medium border transition flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white hover:border-zinc-700';
-    btn.innerHTML='⚙️ Consumo • <span id="pill-cons-count">0</span>';
+    btn.id='btn-consumo';
+    btn.className='h-9 px-5 rounded-full text-[13px] font-medium border flex items-center gap-2 bg-[#151518] border-[#232326] text-zinc-400 hover:text-white';
+    btn.innerHTML='📦 Consumo • <span id="pill-cons-count">0</span>';
     btn.onclick=()=>{
       const main=document.querySelector('main');
       const root=document.getElementById('consumo-root');
-      const active = root.style.display!=='none';
-      // desativa todos pills visuais
-      const allPills=bar.querySelectorAll('button');
-      allPills.forEach(p=>{ p.classList.remove('pill-active','bg-white','text-black','border-white'); p.classList.add('bg-[#151518]','border-[#232326]','text-zinc-400'); });
-      if(active){
+      const isOpen=root.style.display!=='none';
+      // reset pills
+      bar.querySelectorAll('button').forEach(b=>{ b.classList.remove('pill-active','bg-white','text-black'); });
+      if(isOpen){
         root.style.display='none';
         if(main) main.style.display='';
-        // reativa Livre como ativo visualmente? deixa ambos inativos que React corrige no próximo render
       }else{
         if(main) main.style.display='none';
         root.style.display='block';
         btn.classList.add('pill-active');
-        btn.classList.remove('bg-[#151518]','border-[#232326]','text-zinc-400');
-        buildUI();
+        build();
         refresh();
       }
     };
@@ -225,19 +267,13 @@ Error generating stack: `+u.message+`
   }
 
   function init(){
-    buildUI();
-    let tries=0;
-    const iv=setInterval(()=>{
-      tries++;
-      if(injectPill() || tries>80) clearInterval(iv);
-    },400);
+    build();
+    let t=0; const iv=setInterval(()=>{ t++; if(injectBtn()||t>100) clearInterval(iv); }, 300);
   }
-
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.addEventListener('load', init);
-  setTimeout(init, 800);
-  setTimeout(init, 2000);
+  setTimeout(init, 500);
+  setTimeout(init, 1500);
 })();
 </script>
 
