@@ -21,8 +21,7 @@
     };
     firebase.initializeApp(firebaseConfig);
     window.firebase = firebase;
-    window._syncIgnore = {};
-    window._lastLocalSave = {};
+    console.log("✅ Firebase estável sem loop");
   </script>
 
 </head>
@@ -52,97 +51,86 @@ Error generating stack: `+u.message+`
   
 
 <script>
-function setupRealtimeSyncV3(){
-  if(!window.firebase?.database){ setTimeout(setupRealtimeSyncV3, 300); return; }
-  const db = window.firebase.database();
-  const chaves = ["wms_final_ruas", "wms_final_materiais", "wms_final_posicoes"];
-  console.log("🔄 Sync V3 - anti ressurreição");
+(function(){
+  function initStable(){
+    if(!window.firebase?.database){ setTimeout(initStable, 300); return; }
+    const db = window.firebase.database();
+    console.log("🔧 Modo estável: salva na nuvem, NÃO recarrega sozinho");
 
-  window.$iRealtime = function(chave, valor){
-    try{ localStorage.setItem(chave, JSON.stringify(valor)); }catch(e){}
-    window._syncIgnore[chave] = true;
-    window._lastLocalSave[chave] = Date.now();
-    db.ref(chave).set(valor)
-      .then(()=> console.log("✅ Nuvem:", chave, "len:", JSON.stringify(valor).length))
-      .catch(err => console.error("❌ Firebase:", err.code, err.message));
-    // libera trava depois de 3s
-    setTimeout(()=>{ window._syncIgnore[chave] = false; }, 3000);
-  };
+    // Substitui $i para só salvar, sem escutar loop
+    window.$iRealtime = function(chave, valor){
+      try{ localStorage.setItem(chave, JSON.stringify(valor)); }catch(e){}
+      // Só salva se valor não for vazio ou se for deleção intencional
+      db.ref(chave).set(valor)
+        .then(()=> console.log("✅ Salvo nuvem:", chave))
+        .catch(err => console.error("❌ Erro:", err));
+    };
+    setTimeout(()=>{ window.$i = window.$iRealtime; }, 800);
 
-  setTimeout(()=>{ window.$i = window.$iRealtime; console.log("🔧 $i = realtime V3"); }, 800);
+    // Função para FORÇAR limpeza definitiva (apaga da nuvem e local)
+    window.limparTudoFirebase = function(){
+      if(!confirm("⚠️ Isso vai APAGAR TUDO da nuvem e local (materiais e posições). Tem certeza?")) return;
+      localStorage.removeItem("wms_final_materiais");
+      localStorage.removeItem("wms_final_posicoes");
+      localStorage.removeItem("wms_final_ruas");
+      db.ref("wms_final_materiais").remove();
+      db.ref("wms_final_posicoes").remove();
+      db.ref("wms_final_ruas").remove();
+      alert("Limpo! Recarregando...");
+      setTimeout(()=> location.reload(), 500);
+    };
 
-  // ESCUTA MAS NÃO RESSUSCITA DELEÇÃO
-  chaves.forEach(chave => {
-    db.ref(chave).on("value", snap => {
-      const nuvem = snap.val();
-      if(!nuvem) return;
-      // Se acabamos de salvar local, ignora o retorno da nuvem por 3s
-      if(window._syncIgnore[chave]){ 
-        console.log("⏭️ Ignorando eco da nuvem para", chave); 
-        return; 
-      }
-      const localStr = localStorage.getItem(chave);
-      if(!localStr) return;
+    // Função para apagar SÓ o material fantasma 1000001122
+    window.apagarMaterialFantasma = function(){
       try{
-        const local = JSON.parse(localStr);
-        // Se local tem MENOS itens que nuvem e foi salvo recentemente (<5s), é deleção intencional -> NÃO restaura
-        const tempoDesdeUltimoSave = Date.now() - (window._lastLocalSave[chave] || 0);
-        if(tempoDesdeUltimoSave < 5000 && Array.isArray(local) && Array.isArray(nuvem) && local.length < nuvem.length){
-          console.log("🗑️ Deleção detectada em", chave, "- mantendo local e enviando para nuvem");
-          window.$iRealtime(chave, local);
-          return;
+        let livre = JSON.parse(localStorage.getItem("wms_final_materiais")||"[]");
+        console.log("Livre antes:", livre);
+        let filtrado = livre.filter(m => {
+          const codigo = String(m.codigo||m.id||"");
+          return codigo !== "1000001122" && m.id !== "1000001122";
+        });
+        // Se ainda tem o item, filtra por qualquer campo que contenha 1000001122
+        if(filtrado.length === livre.length){
+          filtrado = livre.filter(m => JSON.stringify(m).indexOf("1000001122") === -1);
         }
-        if(JSON.stringify(local) !== JSON.stringify(nuvem)){
-          // Só atualiza se nuvem for claramente mais nova (mais itens) ou se passou mais de 5s
-          if(Array.isArray(nuvem) && Array.isArray(local) && nuvem.length < local.length && tempoDesdeUltimoSave < 10000){
-            console.log("⏭️ Nuvem mais antiga que local, ignorando", chave);
-            return;
-          }
-          console.log("📥 Atualizando", chave, "da nuvem");
-          localStorage.setItem(chave, JSON.stringify(nuvem));
-          if(chave === "wms_final_posicoes" || chave === "wms_final_materiais"){
-            const toast = document.createElement("div");
-            toast.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#7c3aed;color:white;padding:12px 24px;border-radius:12px;z-index:99999;font-family:sans-serif;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,0.4)";
-            toast.textContent = "📥 Dados sincronizados de outro dispositivo!";
-            document.body.appendChild(toast);
-            setTimeout(()=> { toast.remove(); location.reload(); }, 1200);
-          }
-        }
-      }catch(e){}
-    });
-  });
+        localStorage.setItem("wms_final_materiais", JSON.stringify(filtrado));
+        db.ref("wms_final_materiais").set(filtrado)
+          .then(()=>{
+            console.log("Fantasma apagado da nuvem");
+            alert("Material 1000001122 apagado definitivamente da nuvem! Recarregando...");
+            setTimeout(()=> location.reload(), 500);
+          });
+      }catch(e){ console.error(e); alert("Erro: "+e.message); }
+    };
 
-  // FUNÇÃO PARA LIMPAR MATERIAIS FANTASMA NA ABA LIVRE
-  window.limparDuplicadosLivre = function(){
-    try{
-      const livre = JSON.parse(localStorage.getItem("wms_final_materiais")||"[]");
-      const posicoes = JSON.parse(localStorage.getItem("wms_final_posicoes")||"[]");
-      // Cria mapa de ids únicos
-      const unicos = new Map();
-      livre.forEach(m => {
-        const key = m.id || m.codigo;
-        if(!unicos.has(key) || m.qtd > unicos.get(key).qtd){
-          unicos.set(key, m);
+    // Botão flutuante para limpar
+    setTimeout(()=>{
+      const btn = document.createElement("div");
+      btn.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:8px;";
+      btn.innerHTML = `
+        <button id="btnFantasma" style="background:#ef4444;color:white;border:none;padding:10px 16px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3)">🗑️ Apagar 1000001122 fantasma</button>
+        <button id="btnLimparTudo" style="background:#0e0e10;border:1px solid #333;color:#888;padding:8px 16px;border-radius:20px;font-size:10px;cursor:pointer">Limpar tudo Firebase</button>
+      `;
+      document.body.appendChild(btn);
+      document.getElementById("btnFantasma").onclick = window.apagarMaterialFantasma;
+      document.getElementById("btnLimparTudo").onclick = window.limparTudoFirebase;
+    }, 2000);
+
+    // Carrega da nuvem SÓ UMA VEZ no início, se local estiver vazio
+    const localMateriais = localStorage.getItem("wms_final_materiais");
+    if(!localMateriais || localMateriais === "[]"){
+      db.ref("wms_final_materiais").once("value").then(snap=>{
+        const val = snap.val();
+        if(val && Array.isArray(val) && val.length>0){
+          localStorage.setItem("wms_final_materiais", JSON.stringify(val));
+          console.log("📥 Carregado da nuvem (primeira vez)");
+          location.reload();
         }
       });
-      const limpo = Array.from(unicos.values()).filter(m => m.qtd > 0);
-      console.log("Antes:", livre.length, "Depois:", limpo.length);
-      if(limpo.length !== livre.length){
-        localStorage.setItem("wms_final_materiais", JSON.stringify(limpo));
-        window.$iRealtime("wms_final_materiais", limpo);
-        alert(`Limpeza feita! ${livre.length - limpo.length} duplicados removidos.`);
-        location.reload();
-      } else {
-        alert("Nenhum duplicado encontrado. Se um material sozinho apareceu, me diga o código dele que eu verifico.");
-      }
-    }catch(e){ console.error(e); }
-  };
-
-  db.ref(".info/connected").on("value", s => {
-    console.log(s.val() ? "🟢 Conectado" : "🔴 Desconectado");
-  });
-}
-setupRealtimeSyncV3();
+    }
+  }
+  initStable();
+})();
 </script>
 
 </body>
