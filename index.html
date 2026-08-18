@@ -45,71 +45,38 @@ Error generating stack: `+u.message+`
       const ruas=JSON.parse(rawRuas);
       let pos=JSON.parse(rawPos);
       const esperado=ruas.length*70;
-      console.log('[FIX] Ruas:', ruas.length, 'Pos esperadas:', esperado, 'Pos atuais:', pos.length);
       if(pos.length!==esperado){
-        // tenta preservar itens existentes mapeando por posId antigo
         const mapa={};
-        for(const p of pos){
-          if(p.itens && p.itens.length>0){
-            mapa[p.posId]=p.itens;
-            // também mapeia por ruaIndex-nivel-div
-            const key=`${p.ruaIndex}-${p.nivel}-${p.div}`;
-            mapa[key]=p.itens;
-          }
-        }
+        for(const p of pos){ if(p.itens && p.itens.length>0){ mapa[p.posId]=p.itens; } }
         const novo=[];
-        for(let t=0;t<ruas.length;t++){
-          for(let r=1;r<=7;r++){
-            for(let l=1;l<=10;l++){
-              const posId=`${t}-${r}-${l}`;
-              const key2=`${t}-${r}-${l}`;
-              const itens=mapa[posId]||mapa[key2]||[];
-              novo.push({posId, ruaIndex:t, nivel:r, div:l, itens:itens});
-            }
-          }
+        for(let t=0;t<ruas.length;t++) for(let r=1;r<=7;r++) for(let l=1;l<=10;l++){
+          const posId=`${t}-${r}-${l}`;
+          novo.push({posId, ruaIndex:t, nivel:r, div:l, itens:mapa[posId]||[]});
         }
         localStorage.setItem(KEY_POS, JSON.stringify(novo));
-        console.log('[FIX] Posições reconstruídas de', pos.length, 'para', novo.length);
-        return true;
       }
-      // mesmo se tamanho ok, verifica duplicados de itens
-      const seen=new Map();
-      let alterou=false;
+      // remove duplicados entre ruas
+      const seen=new Map(); let alterou=false;
       for(const p of pos){
         for(const it of (p.itens||[])){
           const id=String(it.materialId);
           if(seen.has(id)){
-            const outraPos=seen.get(id);
-            if(outraPos.posId!==p.posId){
-              console.log('[FIX] Material', id, 'duplicado em', p.posId, 'e', outraPos.posId, '- removendo de', p.posId);
-              p.itens=p.itens.filter(x=>String(x.materialId)!==id);
-              alterou=true;
-            }
-          } else {
-            seen.set(id, p);
-          }
+            p.itens=p.itens.filter(x=>String(x.materialId)!==id);
+            alterou=true;
+          } else seen.set(id,p);
         }
       }
-      if(alterou){
-        localStorage.setItem(KEY_POS, JSON.stringify(pos));
-        console.log('[FIX] Duplicados entre ruas removidos');
-      }
-    }catch(e){ console.error('Erro reconstruir', e); }
-    return false;
+      if(alterou) localStorage.setItem(KEY_POS, JSON.stringify(pos));
+    }catch(e){}
   }
+  setInterval(reconstruirPosicoes, 3000);
 
-  // Roda ao carregar e a cada 2s
-  reconstruirPosicoes();
-  setInterval(reconstruirPosicoes, 2000);
-  window.addEventListener('storage', ()=>setTimeout(reconstruirPosicoes, 300));
-
-  // CONSUMO
   const getMat=()=>{
     try{
       const arr=JSON.parse(localStorage.getItem(KEY_MAT)||"[]");
       return arr.map(m=>{
         let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=0;
-        return {...m, _saldo:Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||''};
+        return {...m, _saldo:Number(String(s).replace(',','.'))||0, _nome:m.nome||m.descricao||m.codigo||m.sku||'SEM NOME', _sku:m.sku||m.codigo||'', _codigo:(m.codigo||m.sku||'').toLowerCase()};
       });
     }catch{return []}
   };
@@ -124,6 +91,18 @@ Error generating stack: `+u.message+`
   };
   const setCons=v=>localStorage.setItem(KEY_CONS, JSON.stringify(v));
 
+  let selectedMaterial=null;
+
+  function buscarMaterialPorCodigo(codigo){
+    const mats=getMat();
+    const cod=codigo.trim().toLowerCase();
+    if(!cod) return null;
+    // busca exata ou contém
+    let found=mats.find(m=>m._codigo===cod || String(m.codigo||'').toLowerCase()===cod || String(m.sku||'').toLowerCase()===cod);
+    if(!found) found=mats.find(m=>m._codigo.includes(cod) || m._nome.toLowerCase().includes(cod));
+    return found||null;
+  }
+
   function renderPanel(){
     const root=document.getElementById('consumo-root');
     const mats=getMat(); const cons=getCons();
@@ -132,98 +111,175 @@ Error generating stack: `+u.message+`
         <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
           <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
           <div style="display:flex; gap:8px;">
-            <button id="c-fix" style="height:36px; padding:0 16px; border-radius:9999px; background:#ef4444; color:white; font-weight:bold; font-size:12px;">🚨 CORRIGIR RUA 12→14</button>
-            <button id="c-rebuild" style="height:36px; padding:0 16px; border-radius:9999px; background:#7c3aed; color:white; font-size:12px;">Reconstruir Posições</button>
+            <button id="c-fix" style="height:32px; padding:0 12px; border-radius:9999px; background:#ef4444; color:white; font-size:11px; font-weight:bold;">CORRIGIR RUA 12→14</button>
+            <div style="color:#71717a; font-size:11px; border:1px solid #232326; border-radius:9999px; padding:6px 12px;">${mats.length} mat | ${cons.length} cons</div>
           </div>
         </div>
+
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; padding:16px;">
-          <div style="color:white; font-weight:bold;">CONSUMO + FIX DE DUPLICAÇÃO</div>
-          <div style="color:#71717a; font-size:11px; margin-bottom:12px;">Clique em CORRIGIR para remover material da Rua 14 que deveria estar só na 12</div>
-          <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap:12px;">
-            <div><select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;">${mats.length===0?'<option>NENHUM</option>':'<option value="">Selecione...</option>'+mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}</select></div>
-            <div><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Qtd"></div>
-            <div><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;"><option>Produção</option><option>Perda</option></select></div>
-            <div style="display:flex; gap:8px;"><input id="c-op" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="OP"><button id="c-btn" style="height:44px; padding:0 20px; border-radius:9999px; background:white; color:black; font-weight:bold;">BAIXAR</button></div>
+          <div style="color:white; font-weight:bold; font-size:14px;">CONSUMO - Baixa Manual por Código</div>
+          <div style="color:#71717a; font-size:11px; margin-bottom:16px;">Digite o código manualmente ou selecione na lista - baixa automática no estoque</div>
+          
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-bottom:12px; background:#0e0e10; border:1px dashed #2a2a30; border-radius:12px; padding:12px;">
+            <div style="grid-column: span 2;">
+              <label style="font-size:11px; color:#fbbf24; font-weight:bold;">🔍 DIGITAR CÓDIGO MANUALMENTE *</label>
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <input id="c-codigo-manual" style="flex:1; height:44px; background:#000; border:2px solid #7c3aed; color:white; border-radius:12px; padding:0 12px; font-size:14px; font-weight:bold;" placeholder="Ex: AUT100, 12345... + ENTER" autofocus>
+                <button id="c-buscar-cod" style="height:44px; padding:0 16px; border-radius:12px; background:#7c3aed; color:white; font-weight:bold;">BUSCAR</button>
+              </div>
+              <div id="c-resultado-busca" style="margin-top:8px; font-size:12px;"></div>
+            </div>
+            <div>
+              <label style="font-size:11px; color:#71717a;">Ou selecione na lista</label>
+              <select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:6px;">
+                <option value="">Selecione...</option>${mats.map(m=>`<option value="${m.id}">${m._sku} - ${m._nome} | Saldo:${m._saldo}</option>`).join('')}
+              </select>
+            </div>
           </div>
-          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px;"></div>
+
+          <div id="c-material-selecionado" style="display:none; background:#0e0e10; border:1px solid #7c3aed; border-radius:12px; padding:12px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="color:#a78bfa; font-size:11px; font-weight:bold;">MATERIAL SELECIONADO:</div>
+                <div id="c-sel-nome" style="color:white; font-weight:bold; font-size:14px;"></div>
+                <div id="c-sel-sku" style="color:#71717a; font-size:12px;"></div>
+              </div>
+              <div style="text-align:right;">
+                <div style="color:#71717a; font-size:11px;">SALDO ATUAL</div>
+                <div id="c-sel-saldo" style="color:#10b981; font-size:20px; font-weight:bold;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:12px;">
+            <div><label style="font-size:11px; color:#a1a1aa;">Qtd a baixar *</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="Ex: 5"></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option><option>Ajuste</option></select></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">OP / Destino</label><input id="c-op" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="OP-001"></div>
+            <div style="display:flex; align-items:end;"><button id="c-btn" style="width:100%; height:44px; border-radius:9999px; background:white; color:black; font-weight:bold; font-size:14px;">BAIXAR ESTOQUE</button></div>
+            <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs: pago para produção..."></div>
+          </div>
+          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px; font-weight:bold;"></div>
         </div>
+
         <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:16px;">
-          <div style="padding:12px; border-bottom:1px solid #232326;"><b style="color:white;">Histórico Consumo</b></div>
-          <div style="overflow:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Material</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
-        </div>
-        <div style="background:#0e0e10; border:1px solid #232326; border-radius:16px; padding:12px; margin-top:16px; font-size:11px; color:#71717a;">
-          <div style="font-weight:bold; color:white; margin-bottom:6px;">Diagnóstico atual:</div>
-          <div id="c-diag"></div>
+          <div style="padding:12px; border-bottom:1px solid #232326; display:flex; justify-content:space-between;"><b style="color:white;">Histórico</b><input id="c-busca" placeholder="Buscar código..." style="height:32px; border-radius:9999px; background:#0e0e10; border:1px solid #232326; color:white; padding:0 12px; font-size:12px; width:180px;"></div>
+          <div style="overflow:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Código</th><th style="padding:10px; text-align:left;">Qtd</th><th style="padding:10px; text-align:left;">Antes→Depois</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
         </div>
       </div>
     `;
+
     document.getElementById('c-voltar').onclick=()=>{ document.getElementById('consumo-root').style.display='none'; document.body.style.overflow=''; };
     document.getElementById('c-fix').onclick=()=>{
-      // Força remoção do material da Rua 14
-      try{
-        const pos=JSON.parse(localStorage.getItem(KEY_POS)||"[]");
-        const ruas=JSON.parse(localStorage.getItem(KEY_RUAS)||"[]");
-        // Encontra Rua 12 (index 2? porque Rua 12 pode ser index 2 se tem 8 ruas começando em Rua 12?)
-        // Na verdade melhor: remove duplicados deixando só primeira ocorrência
-        const seen=new Map();
-        let removidos=0;
-        for(const p of pos){
-          const novosItens=[];
-          for(const it of (p.itens||[])){
-            const id=String(it.materialId);
-            if(seen.has(id)){
-              removidos++;
-              continue;
-            }
-            seen.set(id, p.posId);
-            novosItens.push(it);
-          }
-          p.itens=novosItens;
+      const pos=JSON.parse(localStorage.getItem(KEY_POS)||"[]");
+      const seen=new Map(); let rem=0;
+      for(const p of pos){
+        const novos=[];
+        for(const it of (p.itens||[])){
+          const id=String(it.materialId);
+          if(seen.has(id)){ rem++; continue; }
+          seen.set(id, p.posId);
+          novos.push(it);
         }
-        localStorage.setItem(KEY_POS, JSON.stringify(pos));
-        alert(`Corrigido! ${removidos} duplicados removidos. Agora recarregue a página (F5).`);
-        location.reload();
-      }catch(e){ alert('Erro: '+e); }
-    };
-    document.getElementById('c-rebuild').onclick=()=>{
-      localStorage.removeItem(KEY_POS);
-      alert('Posições apagadas, recarregue a página (F5) que o sistema vai recriar limpo baseado nas suas 8 ruas (8*70=560 posições).');
+        p.itens=novos;
+      }
+      localStorage.setItem(KEY_POS, JSON.stringify(pos));
+      alert(`Corrigido ${rem} duplicados! F5 para recarregar.`);
       location.reload();
     };
+
+    const inputManual=document.getElementById('c-codigo-manual');
+    const btnBuscar=document.getElementById('c-buscar-cod');
+    const resultado=document.getElementById('c-resultado-busca');
     const sel=document.getElementById('c-mat');
-    const tbody=document.getElementById('c-tbody');
-    const consList=getCons().sort((a,b)=>b.id-a.id);
-    tbody.innerHTML=consList.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;">${c.nome}</td><td style="padding:10px;">-${c.qtd}</td><td style="padding:10px;">${c.antes}→${c.depois}</td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center;">Nenhum</td></tr>';
-    tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
-      const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
-      const cur=getMat(); const idx=cur.findIndex(x=>String(x.id)===String(it.materialId));
-      if(idx>-1){ cur[idx]._saldo+=Number(it.qtd); setMat(cur); }
-      setCons(all.filter(x=>String(x.id)!==String(id)));
-      renderPanel();
+    const cardSel=document.getElementById('c-material-selecionado');
+
+    function selecionarMaterial(mat){
+      selectedMaterial=mat;
+      cardSel.style.display='block';
+      document.getElementById('c-sel-nome').textContent=mat._nome;
+      document.getElementById('c-sel-sku').textContent=mat._sku+' | Código: '+(mat.codigo||mat.sku);
+      document.getElementById('c-sel-saldo').textContent=mat._saldo+' '+(mat.unidade||'');
+      sel.value=mat.id;
+      document.getElementById('c-qtd').focus();
+      resultado.innerHTML=`<div style="color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); padding:8px; border-radius:8px;">✅ Encontrado: <b>${mat._sku} - ${mat._nome}</b> | Saldo: ${mat._saldo}</div>`;
+    }
+
+    function buscarCodigo(){
+      const cod=inputManual.value.trim();
+      if(!cod){ resultado.innerHTML='<div style="color:#ef4444;">Digite um código</div>'; return; }
+      const mat=buscarMaterialPorCodigo(cod);
+      if(mat){
+        selecionarMaterial(mat);
+      } else {
+        resultado.innerHTML=`<div style="color:#ef4444; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:8px; border-radius:8px;">❌ Código <b>${cod}</b> não encontrado no estoque. Verifique em Estoque • ${getMat().length} materiais disponíveis. Tente: ${getMat().slice(0,3).map(m=>m._sku).join(', ')}</div>`;
+        cardSel.style.display='none';
+        selectedMaterial=null;
+      }
+    }
+
+    btnBuscar.onclick=buscarCodigo;
+    inputManual.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); buscarCodigo(); } });
+    inputManual.addEventListener('input', ()=>{
+      const cod=inputManual.value.trim().toLowerCase();
+      if(cod.length>=2){
+        const mats=getMat();
+        const sug=mats.filter(m=>m._codigo.includes(cod) || m._nome.toLowerCase().includes(cod)).slice(0,5);
+        if(sug.length>0){
+          resultado.innerHTML='<div style="color:#71717a;">Sugestões: '+sug.map(m=>`<button class="sug-btn" data-id="${m.id}" style="margin:2px; padding:4px 8px; border-radius:9999px; background:#232326; color:white; font-size:11px; border:1px solid #2a2a30;">${m._sku}</button>`).join('')+'</div>';
+          resultado.querySelectorAll('.sug-btn').forEach(b=>{
+            b.onclick=()=>{
+              const mat=mats.find(x=>String(x.id)===String(b.dataset.id));
+              if(mat){ inputManual.value=mat._sku; selecionarMaterial(mat); }
+            };
+          });
+        }
+      }
     });
+
+    sel.addEventListener('change', ()=>{
+      const mat=getMat().find(x=>String(x.id)===String(sel.value));
+      if(mat){ inputManual.value=mat._sku; selecionarMaterial(mat); }
+    });
+
+    const tbody=document.getElementById('c-tbody');
+    const busca=document.getElementById('c-busca');
+    const draw=()=>{
+      let list=getCons().sort((a,b)=>b.id-a.id);
+      const f=(busca.value||'').toLowerCase();
+      if(f) list=list.filter(x=>JSON.stringify(x).toLowerCase().includes(f));
+      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.sku}</b><div style="font-size:11px; color:#71717a;">${c.nome}</div></td><td style="padding:10px; font-weight:bold;">-${c.qtd}</td><td style="padding:10px;">${c.antes} → <b style="color:white;">${c.depois}</b></td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center;">Nenhum</td></tr>';
+      tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
+        const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
+        const cur=getMat(); const idx=cur.findIndex(x=>String(x.id)===String(it.materialId));
+        if(idx>-1){ cur[idx]._saldo+=Number(it.qtd); setMat(cur); }
+        setCons(all.filter(x=>String(x.id)!==String(id)));
+        renderPanel();
+      });
+    };
+    busca.addEventListener('input', draw); draw();
+
     document.getElementById('c-btn').onclick=()=>{
-      const matId=sel.value; if(!matId){ alert('Selecione'); return; }
-      const cur=getMat(); const mat=cur.find(x=>String(x.id)===String(matId));
+      if(!selectedMaterial){ alert('Primeiro digite o código e clique em BUSCAR'); return; }
+      const cur=getMat(); const mat=cur.find(x=>String(x.id)===String(selectedMaterial.id));
+      if(!mat){ alert('Material não encontrado mais'); return; }
       const q=Number((document.getElementById('c-qtd').value||'').replace(',','.'));
       if(!q||q<=0){ alert('Qtd inválida'); return; }
       if(q>mat._saldo){ alert('Saldo insuficiente: '+mat._saldo); return; }
       const antes=mat._saldo, depois=antes-q;
       const idx=cur.findIndex(x=>String(x.id)===String(mat.id)); cur[idx]._saldo=depois; setMat(cur);
-      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
+      const reg={id:Date.now(), materialId:mat.id, sku:mat._sku, nome:mat._nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, data:new Date().toLocaleDateString('pt-BR'), antes, depois};
       const all=getCons(); all.push(reg); setCons(all);
-      renderPanel();
+      const msg=document.getElementById('c-msg');
+      msg.textContent=`✅ Baixa manual: ${q} de ${reg.sku} - ${reg.nome} | ${antes} → ${depois}`;
+      msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
+      // limpa para próximo
+      inputManual.value=''; document.getElementById('c-qtd').value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
+      selectedMaterial=null; cardSel.style.display='none';
+      setTimeout(()=>renderPanel(), 1500);
     };
-    // diag
-    try{
-      const pos=JSON.parse(localStorage.getItem(KEY_POS)||"[]");
-      const ruas=JSON.parse(localStorage.getItem(KEY_RUAS)||"[]");
-      const diag=document.getElementById('c-diag');
-      if(diag){
-        const ocupadas=pos.filter(p=>p.itens&&p.itens.length>0);
-        diag.innerHTML=`Ruas: ${ruas.length} | Posições totais: ${pos.length} (esperado ${ruas.length*70}) | Ocupadas: ${ocupadas.length}<br>`+
-          ocupadas.map(p=>`RuaIdx ${p.ruaIndex} (Rua ${p.ruaIndex+12? '' : ''}) pos ${p.posId} -> ${p.itens.map(i=>i.codigo).join(', ')}`).join('<br>');
-      }
-    }catch{}
+
+    // foco no campo manual
+    setTimeout(()=>document.getElementById('c-codigo-manual')?.focus(), 300);
   }
 
   function openPanel(){ const r=document.getElementById('consumo-root'); renderPanel(); r.style.display='block'; document.body.style.overflow='hidden'; }
@@ -232,14 +288,14 @@ Error generating stack: `+u.message+`
     for(const d of document.querySelectorAll('div')){ if(d.className&&typeof d.className==='string'&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6')){ if((d.textContent||'').includes('Livre')){ bar=d; break; } } }
     if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
     if(!bar) return false;
-    if(bar.querySelector('#btn-consumo-v8')) return true;
+    if(bar.querySelector('#btn-consumo-v9')) return true;
     const btn=document.createElement('button');
-    btn.id='btn-consumo-v8';
+    btn.id='btn-consumo-v9';
     btn.textContent='📦 Consumo • 0';
     btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; border:1px solid #232326; background:#151518; color:#a1a1aa;';
     btn.onclick=openPanel;
     bar.appendChild(btn);
-    setInterval(()=>{ const el=document.getElementById('btn-consumo-v8'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
+    setInterval(()=>{ const el=document.getElementById('btn-consumo-v9'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
     return true;
   }
   function init(){ let t=0; const iv=setInterval(()=>{ t++; if(inject()||t>200) clearInterval(iv); }, 300); }
