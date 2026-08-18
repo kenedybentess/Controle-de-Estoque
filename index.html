@@ -21,7 +21,6 @@
     };
     firebase.initializeApp(firebaseConfig);
     window.firebase = firebase;
-    window._lastSave = {};
   </script>
 
 </head>
@@ -52,80 +51,31 @@ Error generating stack: `+u.message+`
 
 <script>
 (function(){
-  function initSync(){
-    if(!window.firebase?.database){ setTimeout(initSync, 300); return; }
+  function initClean(){
+    if(!window.firebase?.database){ setTimeout(initClean, 300); return; }
     const db = window.firebase.database();
-    console.log("🔄 Sync inteligente - sem loop");
-
-    // SAVE: local + nuvem com timestamp
     window.$i = function(chave, valor){
       try{ localStorage.setItem(chave, JSON.stringify(valor)); }catch(e){}
-      window._lastSave[chave] = Date.now();
-      db.ref(chave).set(valor)
-        .then(()=> console.log("☁️ Salvo:", chave))
-        .catch(e=> console.error("❌", e));
+      db.ref(chave).set(valor);
     };
-
-    // LOAD + LISTEN inteligente
-    const chaves = ["wms_final_ruas","wms_final_materiais","wms_final_posicoes"];
-    
-    chaves.forEach(chave=>{
-      // 1. Carga inicial se local vazio
-      if(!localStorage.getItem(chave)){
-        db.ref(chave).once("value").then(snap=>{
-          const v = snap.val();
-          if(v){
-            localStorage.setItem(chave, JSON.stringify(v));
-            console.log("📥 Carga inicial:", chave);
-            if(chave==="wms_final_posicoes") location.reload();
-          }
-        });
-      }
-
-      // 2. Escuta mudanças de OUTROS dispositivos
-      db.ref(chave).on("value", snap=>{
-        const nuvem = snap.val();
-        if(!nuvem) return;
-        
-        const localStr = localStorage.getItem(chave);
-        if(!localStr) return;
-        
-        const nuvemStr = JSON.stringify(nuvem);
-        if(localStr === nuvemStr) return; // igual, ignora
-
-        const tempoDesdeSave = Date.now() - (window._lastSave[chave]||0);
-        // Se eu acabei de salvar (<3s), é meu próprio eco, ignora
-        if(tempoDesdeSave < 3000){
-          console.log("⏭️ Eco próprio ignorado:", chave);
-          return;
-        }
-
-        console.log("📥 Novo dado de outro dispositivo:", chave);
-        localStorage.setItem(chave, nuvemStr);
-
-        // Mostra aviso COM BOTÃO, não recarrega sozinho
-        if(document.getElementById("sync-toast")) return; // já tem aviso
-        const toast = document.createElement("div");
-        toast.id = "sync-toast";
-        toast.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#151518;border:1px solid #7c3aed;color:white;padding:12px 16px;border-radius:12px;z-index:99999;font-family:sans-serif;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,0.5)";
-        toast.innerHTML = `
-          <span>📥 Dados novos de outro dispositivo!</span>
-          <button id="btnSync" style="background:#7c3aed;color:white;border:none;padding:6px 14px;border-radius:20px;font-weight:600;cursor:pointer;font-size:12px">ATUALIZAR</button>
-          <button id="btnCloseSync" style="background:transparent;color:#888;border:none;cursor:pointer">✕</button>
-        `;
-        document.body.appendChild(toast);
-        document.getElementById("btnSync").onclick = ()=> location.reload();
-        document.getElementById("btnCloseSync").onclick = ()=> toast.remove();
-        // Auto remove depois de 10s
-        setTimeout(()=>{ const t=document.getElementById("sync-toast"); if(t) t.remove(); }, 10000);
-      });
-    });
-
-    db.ref(".info/connected").on("value", s=>{
-      console.log(s.val() ? "🟢 Conectado - controle-de-estoque-c5cc4" : "🔴 Desconectado");
-    });
+    // Se não tem nada, cria vazio
+    if(!localStorage.getItem("wms_final_ruas")){
+      const ruas = Array.from({length:20}, (_,i)=>({nome: `Rua ${String(i+1).padStart(2,"0")}`}));
+      localStorage.setItem("wms_final_ruas", JSON.stringify(ruas));
+      window.$i("wms_final_ruas", ruas);
+    }
+    if(!localStorage.getItem("wms_final_materiais")){
+      localStorage.setItem("wms_final_materiais", JSON.stringify([]));
+    }
+    if(!localStorage.getItem("wms_final_posicoes")){
+      const pos = [];
+      for(let r=0;r<20;r++) for(let n=1;n<=7;n++) for(let d=1;d<=10;d++) pos.push({posId: `${r}-${n}-${d}`, ruaIndex: r, nivel: n, div: d, itens: []});
+      localStorage.setItem("wms_final_posicoes", JSON.stringify(pos));
+      window.$i("wms_final_posicoes", pos);
+    }
+    console.log("🟢 Projeto zerado pronto");
   }
-  initSync();
+  initClean();
 })();
 </script>
 
