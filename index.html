@@ -32,172 +32,313 @@ Error generating stack: `+u.message+`
   
 
 <div id="consumo-root" style="display:none; position:fixed; inset:0; z-index:999999; background:#0e0e10; overflow:auto;"></div>
+<style>.pill-active{ background:white!important; color:black!important; border-color:white!important; }</style>
 <script>
 (function(){
-  const KM="wms_final_materiais", KP="wms_final_posicoes", KC="wms_final_consumos";
-  function getL(){ try{ const v=localStorage.getItem(KM); return v?JSON.parse(v):[] }catch{return []} }
-  function getP(){ try{ const v=localStorage.getItem(KP); return v?JSON.parse(v):[] }catch{return []} }
-  function getC(){ try{ const v=localStorage.getItem(KC); return v?JSON.parse(v):[] }catch{return []} }
-  function getAll(){
-    try{
-      const livre=getL(); const pos=getP(); const mapa=new Map();
-      for(const m of livre){
-        let s=m.saldo; if(s===undefined) s=m.quantidade; s=Number(String(s||0).replace(',','.'))||0;
-        mapa.set(String(m.id), {id:m.id, codigo:m.codigo||m.sku||'', sku:m.sku||m.codigo||'', nome:m.nome||m.descricao||'', total:s, livre:s, aloc:0, pos:[], lc:(m.codigo||m.sku||'').toLowerCase()});
-      }
-      for(const p of pos){
-        const itens=p.itens||[];
-        for(const it of itens){
-          const id=String(it.materialId); const q=Number(it.qtd)||0;
-          if(mapa.has(id)){
-            const e=mapa.get(id); e.aloc+=q; e.total=e.livre+e.aloc; e.pos.push({posId:p.posId, ri:p.ruaIndex, q});
-          } else {
-            mapa.set(id, {id:it.materialId, codigo:it.codigo||'', sku:it.codigo||'', nome:it.descricao||'', total:q, livre:0, aloc:q, pos:[{posId:p.posId, ri:p.ruaIndex, q}], lc:(it.codigo||'').toLowerCase()});
-          }
+  const KEY_MAT="wms_final_materiais", KEY_POS="wms_final_posicoes", KEY_RUAS="wms_final_ruas", KEY_CONS="wms_final_consumos";
+  
+  function getPos(){ try{return JSON.parse(localStorage.getItem(KEY_POS)||"[]")}catch{return []} }
+  function setPos(v){ localStorage.setItem(KEY_POS, JSON.stringify(v)); }
+  function getLivre(){ try{return JSON.parse(localStorage.getItem(KEY_MAT)||"[]")}catch{return []} }
+  function setLivre(v){ localStorage.setItem(KEY_MAT, JSON.stringify(v)); }
+
+  function getTodos(){
+    const livre=getLivre();
+    const pos=getPos();
+    const mapa=new Map();
+    for(const m of livre){
+      let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=0;
+      const id=String(m.id);
+      mapa.set(id, {
+        id:m.id, codigo:m.codigo||m.sku||'', sku:m.sku||m.codigo||'', nome:m.nome||m.descricao||'',
+        descricao:m.descricao||'', unidade:m.unidade||'UN', valor:m.valor||0,
+        saldoLivre:Number(String(s).replace(',','.'))||0, saldoPos:0, posicoes:[], total:0,
+        _codigo:(m.codigo||m.sku||'').toLowerCase(), _nome:(m.nome||m.descricao||'').toLowerCase()
+      });
+    }
+    for(const p of pos){
+      for(const it of (p.itens||[])){
+        const id=String(it.materialId);
+        const q=Number(it.qtd)||0;
+        if(mapa.has(id)){
+          const e=mapa.get(id);
+          e.saldoPos+=q;
+          e.posicoes.push({posId:p.posId, ruaIndex:p.ruaIndex, nivel:p.nivel, div:p.div, qtd:q});
+        } else {
+          mapa.set(id, {
+            id:it.materialId, codigo:it.codigo||'', sku:it.codigo||'', nome:it.descricao||it.codigo||'',
+            descricao:it.descricao||'', unidade:it.unidade||'UN', valor:it.valor||0,
+            saldoLivre:0, saldoPos:q, posicoes:[{posId:p.posId, ruaIndex:p.ruaIndex, nivel:p.nivel, div:p.div, qtd:q}],
+            total:0, _codigo:(it.codigo||'').toLowerCase(), _nome:(it.descricao||'').toLowerCase()
+          });
         }
       }
-      return Array.from(mapa.values());
-    }catch(e){ console.error('getAll erro', e); return []; }
+    }
+    for(const v of mapa.values()) v.total=v.saldoLivre+v.saldoPos;
+    return Array.from(mapa.values());
   }
-  let sel=null;
+
+  const getCons=()=>{ try{return JSON.parse(localStorage.getItem(KEY_CONS)||"[]")}catch{return []}};
+  const setCons=v=>localStorage.setItem(KEY_CONS, JSON.stringify(v));
+
+  let selected=null;
+
   function buscar(cod){
-    try{
-      const all=getAll(); const c=(cod||'').trim().toLowerCase(); if(!c) return null;
-      for(const m of all) if(String(m.codigo||'').toLowerCase()===c || String(m.sku||'').toLowerCase()===c) return m;
-      for(const m of all) if(m.lc && m.lc.includes(c)) return m;
-      return null;
-    }catch{return null}
+    const all=getTodos();
+    const c=cod.trim().toLowerCase();
+    if(!c) return null;
+    let f=all.find(m=>String(m.codigo||'').toLowerCase()===c || String(m.sku||'').toLowerCase()===c || m._codigo===c);
+    if(!f) f=all.find(m=>m._codigo.includes(c));
+    if(!f) f=all.find(m=>m._nome.includes(c));
+    return f||null;
   }
+
+  function consumirComBaixaNoEstoque(material, qtd){
+    let restante=qtd;
+    let pos=getPos();
+    let livre=getLivre();
+    let log=[];
+
+    // 1. Baixa das POSIÇÕES (prioridade)
+    for(const p of pos){
+      if(restante<=0) break;
+      for(let i=0;i<(p.itens||[]).length;i++){
+        if(restante<=0) break;
+        const it=p.itens[i];
+        if(String(it.materialId)===String(material.id)){
+          const disp=Number(it.qtd)||0;
+          const usar=Math.min(disp, restante);
+          const antes=disp;
+          it.qtd=disp-usar;
+          const depois=it.qtd;
+          log.push(`RuaIdx ${p.ruaIndex} ${p.posId}: ${antes} → ${depois} (-${usar})`);
+          restante-=usar;
+          if(it.qtd<=0){ p.itens.splice(i,1); i--; }
+        }
+      }
+    }
+    pos=pos.map(p=>{ p.itens=(p.itens||[]).filter(it=>Number(it.qtd)>0); return p; });
+
+    // 2. Baixa do LIVRE se ainda faltar
+    if(restante>0){
+      for(const m of livre){
+        if(String(m.id)===String(material.id)){
+          let s=m.saldo; if(s===undefined) s=m.quantidade; if(s===undefined) s=0;
+          s=Number(String(s).replace(',','.'))||0;
+          const usar=Math.min(s, restante);
+          const antes=s;
+          s-=usar;
+          const depois=s;
+          log.push(`LIVRE: ${antes} → ${depois} (-${usar})`);
+          m.saldo=s;
+          if(m.quantidade!==undefined) m.quantidade=s;
+          restante-=usar;
+          break;
+        }
+      }
+    }
+
+    if(restante>0){
+      return {ok:false, msg:`Saldo insuficiente! Ainda faltam ${restante}.`, log};
+    }
+
+    setPos(pos);
+    setLivre(livre);
+    // força atualização do Firebase debounce
+    localStorage.setItem('_wms_last_update', Date.now());
+    return {ok:true, log};
+  }
+
   function render(){
-    try{
-      const root=document.getElementById('consumo-root'); if(!root) return;
-      const all=getAll(); const cons=getC();
-      root.innerHTML=`
-        <div style="max-width:1440px; margin:0 auto; padding:16px; font-family:Inter,system-ui;">
-          <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-            <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
-            <div style="font-size:11px; color:#10b981; border:1px solid #10b981; border-radius:9999px; padding:6px 12px;">Total: ${all.reduce((s,m)=>s+(m.total||0),0)} un</div>
+    const root=document.getElementById('consumo-root');
+    const all=getTodos();
+    const cons=getCons();
+    root.innerHTML=`
+      <div style="max-width:1440px; margin:0 auto; padding:16px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+          <button id="c-voltar" style="height:36px; padding:0 16px; border-radius:9999px; background:#232326; color:white; border:1px solid #2a2a30;">← Voltar</button>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <div style="color:#10b981; font-size:11px; border:1px solid #10b981; border-radius:9999px; padding:6px 12px; background:rgba(16,185,129,0.1);">Estoque total: ${all.reduce((s,m)=>s+m.total,0)} un</div>
+            <div style="color:#71717a; font-size:11px; border:1px solid #232326; border-radius:9999px; padding:6px 12px;">${all.length} códigos | ${cons.length} baixas</div>
           </div>
-          <div style="background:#151518; border:2px solid #10b981; border-radius:16px; padding:16px;">
-            <div style="color:white; font-weight:bold;">CONSUMO V15 - SEM TELA BRANCA - Baixa real</div>
-            <div style="color:#71717a; font-size:11px; margin-bottom:10px;">Digite código exato da Rua 12</div>
-            <div style="background:#000; border:2px solid #10b981; border-radius:12px; padding:12px; margin-bottom:12px;">
-              <div style="display:flex; gap:8px;">
-                <input id="c-cod" style="flex:1; height:48px; background:#111; border:2px solid #10b981; color:white; border-radius:10px; padding:0 12px; font-size:16px; font-weight:bold;" placeholder="AUT100190001970">
-                <button id="c-buscar" style="height:48px; padding:0 18px; border-radius:10px; background:#10b981; color:black; font-weight:bold;">BUSCAR</button>
+        </div>
+
+        <div style="background:#151518; border:1px solid #232326; border-radius:16px; padding:16px;">
+          <div style="color:white; font-weight:bold;">CONSUMO - Baixa com subtração automática do estoque</div>
+          <div style="color:#10b981; font-size:11px; margin-bottom:12px;">Ao consumir, o sistema subtrai da Rua 12 (ou outra) e do Livre automaticamente</div>
+          
+          <div style="display:grid; grid-template-columns: 2fr 1fr; gap:12px; margin-bottom:12px; background:#0e0e10; border:2px solid #10b981; border-radius:12px; padding:12px;">
+            <div>
+              <label style="font-size:11px; color:#fbbf24; font-weight:bold;">🔍 CÓDIGO MANUAL</label>
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <input id="c-cod" style="flex:1; height:44px; background:#000; border:2px solid #10b981; color:white; border-radius:12px; padding:0 12px; font-size:14px; font-weight:bold;" placeholder="AUT100190001970 + ENTER" autofocus>
+                <button id="c-buscar" style="height:44px; padding:0 16px; border-radius:12px; background:#10b981; color:black; font-weight:bold;">BUSCAR</button>
               </div>
               <div id="c-res" style="margin-top:8px; font-size:12px;"></div>
             </div>
-            <div id="c-card" style="display:none; background:#0e0e10; border:1px solid #10b981; border-radius:10px; padding:12px; margin-bottom:12px;">
-              <div id="c-nome" style="color:white; font-weight:bold;"></div>
-              <div id="c-sku" style="color:#71717a; font-size:12px;"></div>
-              <div id="c-pos" style="color:#a78bfa; font-size:11px; margin-top:4px;"></div>
-              <div style="margin-top:6px;">Total: <span id="c-total" style="color:#10b981; font-size:20px; font-weight:bold;"></span></div>
+            <div>
+              <label style="font-size:11px; color:#71717a;">Ou selecione</label>
+              <select id="c-mat" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:6px;">
+                <option value="">Selecione...</option>${all.map(m=>`<option value="${m.id}">${m.sku} | Total:${m.total} (Livre:${m.saldoLivre} + Pos:${m.saldoPos})</option>`).join('')}
+              </select>
             </div>
-            <div style="display:flex; gap:10px;">
-              <input id="c-qtd" type="number" style="flex:1; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:10px; padding:0 12px;" placeholder="Qtd">
-              <button id="c-btn" style="flex:1; height:44px; border-radius:9999px; background:#10b981; color:black; font-weight:bold;">BAIXAR E SUBTRAIR</button>
+          </div>
+
+          <div id="c-card" style="display:none; background:#0e0e10; border:1px solid #10b981; border-radius:12px; padding:12px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between;">
+              <div>
+                <div style="color:#10b981; font-size:11px; font-weight:bold;">SELECIONADO:</div>
+                <div id="c-nome" style="color:white; font-weight:bold; font-size:14px;"></div>
+                <div id="c-sku" style="color:#71717a; font-size:12px;"></div>
+                <div id="c-pos" style="color:#a78bfa; font-size:11px; margin-top:4px;"></div>
+              </div>
+              <div style="text-align:right;">
+                <div style="color:#71717a; font-size:11px;">ESTOQUE ATUAL</div>
+                <div id="c-total" style="color:#10b981; font-size:22px; font-weight:bold;"></div>
+                <div style="font-size:10px; color:#71717a;"><span id="c-livre"></span> | <span id="c-alocado"></span></div>
+              </div>
             </div>
-            <div id="c-msg" style="display:none; margin-top:10px; padding:10px; border-radius:10px; white-space:pre-wrap; font-size:12px;"></div>
           </div>
-          <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:14px;">
-            <div style="padding:10px;"><b style="color:white;">Histórico</b></div>
-            <div style="overflow:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><tbody id="c-tbody"></tbody></table></div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:12px;">
+            <div><label style="font-size:11px; color:#a1a1aa;">Qtd a consumir *</label><input id="c-qtd" type="number" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="5"></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">Tipo</label><select id="c-tipo" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;"><option>Produção</option><option>Perda</option><option>Amostra</option></select></div>
+            <div><label style="font-size:11px; color:#a1a1aa;">OP</label><input id="c-op" style="width:100%; height:44px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px; margin-top:4px;" placeholder="OP"></div>
+            <div style="display:flex; align-items:end;"><button id="c-btn" style="width:100%; height:44px; border-radius:9999px; background:#10b981; color:black; font-weight:bold; font-size:14px;">✓ BAIXAR E SUBTRAIR DO ESTOQUE</button></div>
+            <div style="grid-column: span 4;"><input id="c-obs" style="width:100%; height:40px; background:#0e0e10; border:1px solid #232326; color:white; border-radius:12px; padding:0 12px;" placeholder="Obs..."></div>
           </div>
+          <div id="c-msg" style="display:none; margin-top:12px; padding:12px; border-radius:12px; font-weight:bold; white-space:pre-wrap;"></div>
         </div>
-      `;
-      document.getElementById('c-voltar').onclick=()=>{ root.style.display='none'; document.body.style.overflow=''; };
-      const inp=document.getElementById('c-cod'); const btnB=document.getElementById('c-buscar'); const res=document.getElementById('c-res'); const card=document.getElementById('c-card');
-      function selMat(m){
-        sel=m; card.style.display='block';
-        document.getElementById('c-nome').textContent=m.nome||m.codigo;
-        document.getElementById('c-sku').textContent=m.sku+' | Total '+m.total+' (Livre '+m.livre+' + Aloc '+m.aloc+')';
-        document.getElementById('c-total').textContent=m.total;
-        document.getElementById('c-pos').textContent=m.pos.map(p=>`Rua ${p.ri} ${p.posId} (${p.q})`).join(', ')||'Só Livre';
-        res.innerHTML=`<div style="color:#10b981; background:rgba(16,185,129,0.1); padding:6px; border-radius:6px;">✅ ${m.sku} - Total ${m.total}</div>`;
+
+        <div style="background:#151518; border:1px solid #232326; border-radius:16px; overflow:hidden; margin-top:16px;">
+          <div style="padding:12px; border-bottom:1px solid #232326; display:flex; justify-content:space-between;"><b style="color:white;">Histórico - Subtrações do Estoque</b><input id="c-busca" placeholder="Buscar..." style="height:32px; border-radius:9999px; background:#0e0e10; border:1px solid #232326; color:white; padding:0 12px; font-size:12px; width:180px;"></div>
+          <div style="overflow:auto;"><table style="width:100%; font-size:12px; color:#d4d4d8;"><thead style="font-size:11px; color:#71717a; border-bottom:1px solid #232326;"><tr><th style="padding:10px; text-align:left;">Data</th><th style="padding:10px; text-align:left;">Código</th><th style="padding:10px; text-align:left;">Qtd Baixada</th><th style="padding:10px; text-align:left;">Onde subtraiu</th><th style="padding:10px; text-align:left;">Ação</th></tr></thead><tbody id="c-tbody"></tbody></table></div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('c-voltar').onclick=()=>{ document.getElementById('consumo-root').style.display='none'; document.body.style.overflow=''; };
+
+    const input=document.getElementById('c-cod');
+    const btnBus=document.getElementById('c-buscar');
+    const res=document.getElementById('c-res');
+    const sel=document.getElementById('c-mat');
+    const card=document.getElementById('c-card');
+
+    function selecionar(mat){
+      selected=mat;
+      card.style.display='block';
+      document.getElementById('c-nome').textContent=mat.nome||mat.codigo;
+      document.getElementById('c-sku').textContent=mat.sku;
+      document.getElementById('c-total').textContent=mat.total;
+      document.getElementById('c-livre').textContent='Livre: '+mat.saldoLivre;
+      document.getElementById('c-alocado').textContent='Alocado: '+mat.saldoPos;
+      try{
+        const ruas=JSON.parse(localStorage.getItem(KEY_RUAS)||"[]");
+        const txt=mat.posicoes.map(p=>{
+          const nome=ruas[p.ruaIndex]?.nome||`Rua ${p.ruaIndex+1}`;
+          return `${nome} N${p.nivel} D${p.div} (${p.qtd})`;
+        }).join(', ');
+        document.getElementById('c-pos').textContent=mat.posicoes.length? '📍 '+txt : '📦 Só no Livre';
+      }catch{ document.getElementById('c-pos').textContent='📍 '+mat.posicoes.map(p=>p.posId).join(', '); }
+      sel.value=mat.id;
+      res.innerHTML=`<div style="color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); padding:8px; border-radius:8px;">✅ <b>${mat.sku}</b> | Total ${mat.total} (Livre ${mat.saldoLivre} + Alocado ${mat.saldoPos}) pronto para baixa</div>`;
+      document.getElementById('c-qtd').focus();
+    }
+
+    function buscarCod(){
+      const cod=input.value.trim();
+      if(!cod){ res.innerHTML='<div style="color:#ef4444;">Digite código</div>'; return; }
+      const mat=buscar(cod);
+      if(mat) selecionar(mat);
+      else {
+        res.innerHTML=`<div style="color:#ef4444; background:rgba(239,68,68,0.1); padding:8px; border-radius:8px;">❌ ${cod} não encontrado. Total ${getTodos().length} códigos.</div>`;
+        card.style.display='none'; selected=null;
       }
-      function doBusca(){
-        const cod=inp.value.trim(); if(!cod){ res.innerHTML='Digite código'; return; }
-        const m=buscar(cod); if(m) selMat(m); else { res.innerHTML=`<div style="color:#ef4444;">❌ ${cod} não encontrado</div>`; card.style.display='none'; sel=null; }
+    }
+
+    btnBus.onclick=buscarCod;
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); buscarCod(); } });
+    input.addEventListener('input', ()=>{
+      const c=input.value.trim().toLowerCase();
+      if(c.length>=2){
+        const sug=getTodos().filter(m=>m._codigo.includes(c)||m._nome.includes(c)).slice(0,5);
+        if(sug.length) res.innerHTML='<div style="color:#71717a;">Sugestões: '+sug.map(m=>`<button class="sug" data-id="${m.id}" style="margin:2px; padding:4px 8px; border-radius:9999px; background:#232326; color:white; font-size:11px;">${m.sku} (${m.total})</button>`).join('')+'</div>';
+        res.querySelectorAll('.sug').forEach(b=>b.onclick=()=>{
+          const mat=getTodos().find(x=>String(x.id)===String(b.dataset.id));
+          if(mat){ input.value=mat.sku; selecionar(mat); }
+        });
       }
-      btnB.onclick=doBusca; inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doBusca(); } });
-      const tbody=document.getElementById('c-tbody');
-      const consList=getC().slice(-20).reverse();
-      tbody.innerHTML=consList.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:8px;">${c.data||''}</td><td style="padding:8px; color:white;">${c.sku||''}</td><td style="padding:8px; color:#ef4444;">-${c.qtd||''}</td><td style="padding:8px; font-size:10px;">${c.log||''}</td></tr>`).join('')||'<tr><td colspan="4" style="padding:20px; text-align:center;">Nenhum</td></tr>';
-      document.getElementById('c-btn').onclick=()=>{
-        try{
-          if(!sel){ alert('Busque código'); return; }
-          const q=Number((document.getElementById('c-qtd').value||'').replace(',','.')); if(!q||q<=0){ alert('Qtd inválida'); return; }
-          if(q>sel.total){ alert('Saldo insuficiente: '+sel.total); return; }
-          let rest=q; let pos=getP(); let livre=getL(); let logs=[];
-          for(const p of pos){
-            if(rest<=0) break;
-            for(let i=0;i<(p.itens||[]).length;i++){
-              if(rest<=0) break;
-              const it=p.itens[i];
-              if(String(it.materialId)===String(sel.id) || String(it.codigo||'').toLowerCase()===String(sel.codigo||'').toLowerCase()){
-                const disp=Number(it.qtd)||0; if(disp<=0) continue;
-                const usar=Math.min(disp, rest);
-                logs.push(`Rua ${p.ruaIndex} ${p.posId}: ${disp}->${disp-usar}`);
-                it.qtd=disp-usar; rest-=usar;
-                if(it.qtd<=0){ p.itens.splice(i,1); i--; }
-              }
-            }
-          }
-          pos=pos.map(p=>{ p.itens=(p.itens||[]).filter(it=>Number(it.qtd)>0); return p; });
-          if(rest>0){
-            for(const m of livre){
-              if(String(m.id)===String(sel.id) || String(m.codigo||'').toLowerCase()===String(sel.codigo||'').toLowerCase()){
-                let s=m.saldo; if(s===undefined) s=m.quantidade; s=Number(String(s||0).replace(',','.'))||0;
-                const usar=Math.min(s, rest);
-                logs.push(`LIVRE: ${s}->${s-usar}`);
-                m.saldo=s-usar; if(m.quantidade!==undefined) m.quantidade=m.saldo;
-                rest-=usar; break;
-              }
-            }
-          }
-          if(rest>0){ alert('Faltam '+rest); return; }
-          localStorage.setItem(KP, JSON.stringify(pos));
-          localStorage.setItem(KM, JSON.stringify(livre));
-          // tenta gravar no Firebase sem quebrar
-          try{
-            fetch('https://controle-de-estoque-98bf1-default-rtdb.firebaseio.com/wms_final/posicoes.json', {method:'PUT', body:JSON.stringify(pos), headers:{'Content-Type':'application/json'}}).catch(()=>{});
-            fetch('https://controle-de-estoque-98bf1-default-rtdb.firebaseio.com/wms_final/materiais.json', {method:'PUT', body:JSON.stringify(livre), headers:{'Content-Type':'application/json'}}).catch(()=>{});
-          }catch{}
-          const reg={id:Date.now(), materialId:sel.id, sku:sel.sku, nome:sel.nome, qtd:q, data:new Date().toLocaleString('pt-BR'), log:logs.join('\n')};
-          const allC=getC(); allC.push(reg); localStorage.setItem(KC, JSON.stringify(allC));
-          const msg=document.getElementById('c-msg'); msg.textContent=`✅ BAIXADO! ${q} de ${sel.sku}\n`+logs.join('\n')+`\nRecarregando em 2s...`; msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.color='#a7f3d0'; msg.style.border='1px solid #10b981';
-          setTimeout(()=>{ location.reload(); }, 2000);
-        }catch(e){ alert('Erro: '+e.message); console.error(e); }
-      };
-    }catch(e){ console.error('render erro', e); }
+    });
+    sel.addEventListener('change', ()=>{
+      const mat=getTodos().find(x=>String(x.id)===String(sel.value));
+      if(mat){ input.value=mat.sku; selecionar(mat); }
+    });
+
+    const tbody=document.getElementById('c-tbody');
+    const busca=document.getElementById('c-busca');
+    const draw=()=>{
+      let list=getCons().sort((a,b)=>b.id-a.id);
+      const f=(busca.value||'').toLowerCase();
+      if(f) list=list.filter(x=>JSON.stringify(x).toLowerCase().includes(f));
+      tbody.innerHTML=list.map(c=>`<tr style="border-bottom:1px solid #1e1e22;"><td style="padding:10px;">${c.data}</td><td style="padding:10px; color:white;"><b>${c.sku}</b><div style="font-size:11px; color:#71717a;">${c.nome}</div></td><td style="padding:10px; color:#ef4444; font-weight:bold;">-${c.qtd}</td><td style="padding:10px; font-size:10px; white-space:pre-wrap;">${c.log||c.origem||''}</td><td style="padding:10px;"><button data-id="${c.id}" class="btn-est" style="height:28px; padding:0 12px; border-radius:9999px; background:#232326; color:white;">Estornar</button></td></tr>`).join('')||'<tr><td colspan="5" style="padding:24px; text-align:center;">Nenhum</td></tr>';
+      tbody.querySelectorAll('.btn-est').forEach(b=>b.onclick=()=>{
+        const id=b.dataset.id; const all=getCons(); const it=all.find(x=>String(x.id)===String(id));
+        const livre=getLivre();
+        const idx=livre.findIndex(x=>String(x.id)===String(it.materialId));
+        if(idx>-1){
+          let s=livre[idx].saldo; if(s===undefined) s=livre[idx].quantidade; s=Number(s)||0;
+          s+=Number(it.qtd); livre[idx].saldo=s; if(livre[idx].quantidade!==undefined) livre[idx].quantidade=s;
+          setLivre(livre);
+        } else {
+          livre.push({id:it.materialId, codigo:it.sku, descricao:it.nome, qtd:it.qtd, saldo:it.qtd});
+          setLivre(livre);
+        }
+        setCons(all.filter(x=>String(x.id)!==String(id)));
+        render();
+      });
+    };
+    busca.addEventListener('input', draw); draw();
+
+    document.getElementById('c-btn').onclick=()=>{
+      if(!selected){ alert('Busque o código primeiro'); return; }
+      const q=Number((document.getElementById('c-qtd').value||'').replace(',','.'));
+      if(!q||q<=0){ alert('Qtd inválida'); return; }
+      if(q>selected.total){ alert('Saldo insuficiente! Total: '+selected.total); return; }
+      const res=consumirComBaixaNoEstoque(selected, q);
+      if(!res.ok){ alert(res.msg); return; }
+      const reg={id:Date.now(), materialId:selected.id, sku:selected.sku, nome:selected.nome, qtd:q, tipo:document.getElementById('c-tipo').value, op:document.getElementById('c-op').value, data:new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString(), log:res.log.join('\n'), origem:res.log.join(' | ')};
+      const all=getCons(); all.push(reg); setCons(all);
+      const msg=document.getElementById('c-msg');
+      msg.textContent=`✅ SUBTRAÍDO DO ESTOQUE!\n${q} un de ${reg.sku}\n`+res.log.join('\n')+`\n\nNovo total: ${selected.total-q} (era ${selected.total})`;
+      msg.style.display='block'; msg.style.background='rgba(16,185,129,0.15)'; msg.style.border='1px solid rgba(16,185,129,0.3)'; msg.style.color='#a7f3d0';
+      input.value=''; document.getElementById('c-qtd').value=''; document.getElementById('c-op').value=''; document.getElementById('c-obs').value='';
+      selected=null; card.style.display='none';
+      setTimeout(()=>render(), 1800);
+    };
+    setTimeout(()=>document.getElementById('c-cod')?.focus(), 300);
   }
-  function openP(){
-    try{
-      const r=document.getElementById('consumo-root'); render(); r.style.display='block'; document.body.style.overflow='hidden';
-    }catch(e){ alert('Erro abrir: '+e.message); }
-  }
+
+  function openPanel(){ const r=document.getElementById('consumo-root'); render(); r.style.display='block'; document.body.style.overflow='hidden'; }
   function inject(){
-    try{
-      let bar=null;
-      for(const d of document.querySelectorAll('div')){ if(d.className&&typeof d.className==='string'&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6')){ if((d.textContent||'').includes('Livre')){ bar=d; break; } } }
-      if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent && x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
-      if(!bar) return false;
-      if(bar.querySelector('#btn-v15')) return true;
-      const btn=document.createElement('button');
-      btn.id='btn-v15'; btn.textContent='📦 Consumo V15';
-      btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; border:2px solid #10b981; background:#10b981; color:black; font-weight:bold;';
-      btn.onclick=openP; bar.appendChild(btn);
-      return true;
-    }catch(e){ console.error('inject erro', e); return false; }
+    let bar=null;
+    for(const d of document.querySelectorAll('div')){ if(d.className&&typeof d.className==='string'&&d.className.includes('max-w-[1440px]')&&d.className.includes('pt-6')){ if((d.textContent||'').includes('Livre')){ bar=d; break; } } }
+    if(!bar){ const b=Array.from(document.querySelectorAll('button')).find(x=>x.textContent.includes('Livre')); if(b) bar=b.parentElement; }
+    if(!bar) return false;
+    if(bar.querySelector('#btn-consumo-v11')) return true;
+    const btn=document.createElement('button');
+    btn.id='btn-consumo-v11';
+    btn.textContent='📦 Consumo • 0';
+    btn.style.cssText='height:36px; padding:0 20px; border-radius:9999px; font-size:13px; border:1px solid #10b981; background:#151518; color:#10b981; font-weight:bold;';
+    btn.onclick=openPanel;
+    bar.appendChild(btn);
+    setInterval(()=>{ const el=document.getElementById('btn-consumo-v11'); if(el) el.textContent='📦 Consumo • '+getCons().length; }, 1000);
+    return true;
   }
-  function init(){
-    setTimeout(()=>{
-      let t=0; const iv=setInterval(()=>{ t++; try{ if(inject()||t>100) clearInterval(iv); }catch{ clearInterval(iv); } }, 500);
-    }, 1500);
-  }
+  function init(){ let t=0; const iv=setInterval(()=>{ t++; if(inject()||t>200) clearInterval(iv); }, 300); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.addEventListener('load', init);
+  setTimeout(init, 600);
 })();
 </script>
 
